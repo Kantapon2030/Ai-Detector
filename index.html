@@ -9,10 +9,47 @@
     <style>
         /* Import Inter font from Google Fonts for a modern look */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        /* Custom background animation for a subtle, beautiful effect */
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f0f2f5; /* Light gray background */
+            min-height: 100vh; /* Ensure full viewport height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem; /* Add some padding for smaller screens */
+            position: relative; /* Needed for absolute positioning of background layers */
+            /* Removed overflow: hidden; to allow scrolling */
         }
+
+        /* Background image layer with blur */
+        .background-image-layer {
+            position: absolute;
+            inset: 0; /* Top, right, bottom, left to 0 */
+            background-image: url('https://lh3.googleusercontent.com/pw/AP1GczNVjUWnnYXNitwzScBtKn1A_JiSfiE8SKmrZr0x2geLDc0NjJSbS18jQRkGZHoGeI9KoyVfiVBV-jGq-KlFjUJe0b4ks6Ma0Mdv-wqHFtj6HfS__Pms=w2400'); /* Placeholder: Replace with your green grassland image URL */
+            background-size: cover;
+            background-position: center;
+            filter: blur(8px); /* Apply blur effect */
+            z-index: 0; /* Ensure it's behind other content */
+        }
+
+        /* Gradient overlay layer */
+        .gradient-overlay-layer {
+            position: absolute;
+            inset: 0; /* Top, right, bottom, left to 0 */
+            /* Animated gradient background with transparency */
+            background: linear-gradient(270deg, rgba(224, 242, 247, 0.7), rgba(200, 230, 201, 0.7), rgba(187, 222, 251, 0.7)); /* Light blues and greens with 70% opacity */
+            background-size: 600% 600%;
+            animation: gradientShift 15s ease infinite; /* Smooth, continuous animation */
+            z-index: 1; /* Above the image, below the content */
+        }
+
         /* Custom modal styles for displaying messages */
         .modal {
             display: none; /* Hidden by default */
@@ -69,16 +106,38 @@
             font-size: 0.875rem;
             color: #718096; /* Muted text color */
         }
+
+        /* Enhanced loading spinner animation */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-spinner-enhanced {
+            animation: spin 1s linear infinite;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
     </style>
 </head>
-<body class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-2xl">
+<body>
+    <!-- Background Image Layer -->
+    <div class="background-image-layer"></div>
+    <!-- Gradient Overlay Layer -->
+    <div class="gradient-overlay-layer"></div>
+
+    <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 hover:scale-[1.01] relative z-10">
         <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">พลิกเกมกลโกง: AI ตรวจจับคำตอบที่สร้างโดยปัญญาประดิษฐ์</h1>
 
         <!-- Question Input Section -->
         <div class="mb-6">
             <label for="questionText" class="block text-gray-700 text-sm font-semibold mb-2">ป้อนคำถาม (ไม่บังคับ):</label>
-            <textarea id="questionText" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" placeholder="ป้อนคำถามที่เกี่ยวข้องที่นี่..."></textarea>
+            <textarea id="questionText" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="ป้อนคำถามที่เกี่ยวข้องที่นี่..."></textarea>
             <div class="mt-2 flex items-center">
                 <label for="questionFileInput" class="file-input-label">
                     แนบไฟล์คำถาม (.txt)
@@ -91,7 +150,7 @@
         <!-- Answer Input Section -->
         <div class="mb-6">
             <label for="answerText" class="block text-gray-700 text-sm font-semibold mb-2">ป้อนคำตอบที่ต้องการตรวจสอบ:</label>
-            <textarea id="answerText" rows="8" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" placeholder="วางคำตอบที่นี่..."></textarea>
+            <textarea id="answerText" rows="8" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="วางคำตอบที่นี่..."></textarea>
             <div class="mt-2 flex items-center">
                 <label for="answerFileInput" class="file-input-label">
                     แนบไฟล์คำตอบ (.txt)
@@ -102,9 +161,9 @@
         </div>
 
         <!-- Detect Button -->
-        <button id="detectButton" class="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105">
+        <button id="detectButton" class="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 flex items-center justify-center">
             <span id="buttonText">ตรวจจับ</span>
-            <span id="loadingSpinner" class="hidden animate-spin h-5 w-5 border-4 border-white border-t-transparent rounded-full ml-2"></span>
+            <span id="loadingSpinner" class="hidden loading-spinner-enhanced"></span>
         </button>
 
         <!-- Result Display Area -->
@@ -115,12 +174,17 @@
             </p>
         </div>
 
+        <!-- AI Credit with Gemini Logo -->
+        <p class="text-center text-gray-500 text-sm mt-6 flex items-center justify-center">
+            AI powered by Gemini 
+        </p>
+
         <!-- Custom Modal for Messages (replaces alert/confirm) -->
         <div id="messageModal" class="modal">
             <div class="modal-content">
                 <span class="close-button" id="closeModalButton">&times;</span>
                 <p id="modalMessage" class="text-lg font-medium text-gray-800"></p>
-                <button id="modalOkButton" class="mt-4 bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500">ตกลง</button>
+                <button id="modalOkButton" class="mt-4 bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200">ตกลง</button>
             </div>
         </div>
     </div>
@@ -156,7 +220,7 @@
         // Function to display custom modal messages
         function showModal(message) {
             modalMessage.textContent = message; // Set the message text
-            modalMessage.style.display = 'flex'; // Show the modal using flexbox for centering
+            messageModal.style.display = 'flex'; // Show the modal using flexbox for centering
         }
 
         // Event listeners for modal buttons to close the modal
@@ -260,6 +324,7 @@
             try {
                 // Construct the prompt for the AI model (Gemini-2.0-Flash)
                 let prompt = `คุณเป็นเครื่องมือตรวจจับ AI ที่เชี่ยวชาญและสามารถระบุลักษณะเฉพาะของข้อความที่สร้างโดย AI รุ่นต่างๆ เช่น Gemini, ChatGPT, หรือ Claude โปรดวิเคราะห์ข้อความตอบกลับต่อไปนี้ที่อาจเกี่ยวข้องกับคำถามที่ให้มา และระบุว่าข้อความตอบกลับนี้ถูกสร้างโดยปัญญาประดิษฐ์ (AI) หรือเขียนโดยมนุษย์ (Human) ให้ความมั่นใจในการตรวจจับเป็นเปอร์เซ็นต์ และให้เหตุผลสั้นๆ โดยอ้างอิงถึงลักษณะของ AI รุ่นต่างๆ หากเป็นไปได้
+                โปรดตอบกลับอย่างกระชับที่สุด โดยระบุเพียงประเภท ความมั่นใจ และเหตุผลสั้นๆ เท่านั้น ไม่ต้องมีคำอธิบายเพิ่มเติมหรือบทนำใดๆ
 
                 `;
 
@@ -308,7 +373,14 @@
                 if (result.candidates && result.candidates.length > 0 &&
                     result.candidates[0].content && result.candidates[0].content.parts &&
                     result.candidates[0].content.parts.length > 0) {
-                    const aiResponseText = result.candidates[0].content.parts[0].text;
+                    let aiResponseText = result.candidates[0].content.parts[0].text;
+                    
+                    // Add emoji based on detection type
+                    if (aiResponseText.includes("ประเภท: AI")) {
+                        aiResponseText = "🤖 " + aiResponseText;
+                    } else if (aiResponseText.includes("ประเภท: Human")) {
+                        aiResponseText = "🧑‍💻 " + aiResponseText;
+                    }
                     detectionResult.textContent = aiResponseText; // Display AI's response
                 } else {
                     // Handle cases where the response structure is unexpected or content is missing
