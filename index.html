@@ -102,9 +102,15 @@
             background-color: #cbd5e1; /* Darker gray on hover */
         }
         .file-name {
-            margin-left: 8px;
+            /* Adjusted for better alignment */
+            margin-left: 8px; /* Small margin to separate from label */
             font-size: 0.875rem;
             color: #718096; /* Muted text color */
+            white-space: nowrap; /* Prevent file name from wrapping */
+            overflow: hidden; /* Hide overflow content */
+            text-overflow: ellipsis; /* Show ellipsis for overflow */
+            flex-grow: 1; /* Allow it to take available space */
+            max-width: 120px; /* Adjust as needed for smaller screens to prevent button overflow */
         }
 
         /* Enhanced loading spinner animation */
@@ -139,26 +145,32 @@
         <!-- Question Input Section -->
         <div class="mb-6">
             <label for="questionText" class="block text-gray-700 text-sm font-semibold mb-2">ป้อนคำถาม (ไม่บังคับ):</label>
-            <textarea id="questionText" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="ป้อนคำถามที่เกี่ยวข้องที่นี่..."></textarea>
-            <div class="mt-2 flex items-center">
-                <label for="questionFileInput" class="file-input-label">
+            <textarea id="questionText" rows="1" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="ป้อนคำถามที่เกี่ยวข้องที่นี่..."></textarea>
+            <div class="mt-2 flex items-center flex-nowrap justify-between gap-2">
+                <label for="questionFileInput" class="file-input-label flex-shrink-0">
                     แนบไฟล์คำถาม (.txt)
                 </label>
                 <input type="file" id="questionFileInput" accept=".txt" class="hidden">
                 <span id="questionFileName" class="file-name">ไม่มีไฟล์ที่เลือก</span>
+                <button id="clearQuestionButton" class="ml-auto bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-2 px-4 rounded-lg hover:from-red-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 flex-shrink-0">
+                    ล้างคำถาม
+                </button>
             </div>
         </div>
 
         <!-- Answer Input Section -->
         <div class="mb-6">
             <label for="answerText" class="block text-gray-700 text-sm font-semibold mb-2">ป้อนคำตอบที่ต้องการตรวจสอบ:</label>
-            <textarea id="answerText" rows="8" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="วางคำตอบที่นี่..."></textarea>
-            <div class="mt-2 flex items-center">
-                <label for="answerFileInput" class="file-input-label">
+            <textarea id="answerText" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="วางคำตอบที่นี่..."></textarea>
+            <div class="mt-2 flex items-center flex-nowrap justify-between gap-2">
+                <label for="answerFileInput" class="file-input-label flex-shrink-0">
                     แนบไฟล์คำตอบ (.txt)
                 </label>
                 <input type="file" id="answerFileInput" accept=".txt" class="hidden">
                 <span id="answerFileName" class="file-name">ไม่มีไฟล์ที่เลือก</span>
+                <button id="clearAnswerButton" class="ml-auto bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-2 px-4 rounded-lg hover:from-red-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 flex-shrink-0">
+                    ล้างคำตอบ
+                </button>
             </div>
         </div>
 
@@ -212,6 +224,8 @@
         const modalMessage = document.getElementById('modalMessage');
         const closeModalButton = document.getElementById('closeModalButton');
         const modalOkButton = document.getElementById('modalOkButton');
+        const clearAnswerButton = document.getElementById('clearAnswerButton'); 
+        const clearQuestionButton = document.getElementById('clearQuestionButton'); // New: Clear Question Button
 
         // Firebase variables
         let app;
@@ -222,7 +236,7 @@
         // Function to display custom modal messages
         function showModal(message) {
             modalMessage.textContent = message; // Set the message text
-            messageModal.style.display = 'flex'; // Show the modal using flexbox for centering
+            modalMessage.style.display = 'flex'; // Show the modal using flexbox for centering
         }
 
         // Event listeners for modal buttons to close the modal
@@ -239,21 +253,27 @@
             }
         }
 
-        // Function to handle reading content from a text file input
+        // Function to handle reading content from a file input
         function handleFileRead(fileInput, textArea, fileNameSpan) {
             const file = fileInput.files[0];
             if (file) {
-                // Validate file type to ensure it's a plain text file
-                if (file.type !== 'text/plain') {
-                    showModal("กรุณาเลือกไฟล์ข้อความ (.txt) เท่านั้น");
-                    fileInput.value = ''; // Clear the selected file
+                // Only allow .txt files based on both type and extension
+                const isTxtFile = file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
+
+                if (!isTxtFile) {
+                    showModal(`ไฟล์ประเภท "${file.name.split('.').pop()}" ไม่สามารถอ่านเป็นข้อความธรรมดาได้ กรุณาเลือกไฟล์ .txt เท่านั้น`);
+                    fileInput.value = ''; // Clear the input
                     fileNameSpan.textContent = 'ไม่มีไฟล์ที่เลือก';
                     return;
                 }
+
                 fileNameSpan.textContent = file.name; // Display the selected file name
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     textArea.value = e.target.result; // Populate textarea with file content
+                    // Trigger input event to adjust textarea rows if content is loaded from file
+                    const event = new Event('input', { bubbles: true });
+                    textArea.dispatchEvent(event);
                 };
                 reader.onerror = () => {
                     showModal("เกิดข้อผิดพลาดในการอ่านไฟล์"); // Show error if file reading fails
@@ -268,6 +288,23 @@
         // Add event listeners for file input changes
         questionFileInput.addEventListener('change', () => handleFileRead(questionFileInput, questionText, questionFileName));
         answerFileInput.addEventListener('change', () => handleFileRead(answerFileInput, answerText, answerFileName));
+
+        // Event listener for Clear Question button (New)
+        clearQuestionButton.addEventListener('click', () => {
+            questionText.value = ''; // Clear the textarea
+            questionFileInput.value = ''; // Clear the file input
+            questionFileName.textContent = 'ไม่มีไฟล์ที่เลือก'; // Reset file name display
+            questionText.rows = 1; // Reset question textarea rows
+        });
+
+        // Event listener for Clear Answer button
+        clearAnswerButton.addEventListener('click', () => {
+            answerText.value = ''; // Clear the textarea
+            answerFileInput.value = ''; // Clear the file input
+            answerFileName.textContent = 'ไม่มีไฟล์ที่เลือก'; // Reset file name display
+            detectionResult.textContent = 'ผลลัพธ์จะแสดงที่นี่หลังจากที่คุณคลิกปุ่ม "ตรวจจับ"'; // Reset result area
+            answerText.rows = 6; // Reset answer textarea rows
+        });
 
         // Initialize Firebase and authenticate the user (anonymous or with custom token)
         async function initializeFirebaseAndAuth() {
@@ -305,6 +342,39 @@
 
         // Call the Firebase initialization function when the script loads
         initializeFirebaseAndAuth();
+
+        // Constants for textarea auto-expansion
+        const minQuestionRows = 1;
+        const maxQuestionRows = 4;
+        const minAnswerRows = 6;
+        const maxAnswerRows = 20;
+
+        // Function to auto-expand textarea based on content
+        function autoExpandTextarea(textarea, minRows, maxRows) {
+            // Temporarily set rows to 1 to get the true scrollHeight
+            textarea.rows = 1;
+            const scrollHeight = textarea.scrollHeight;
+            const lineHeight = parseInt(window.getComputedStyle(textarea).lineHeight);
+            
+            // Calculate number of lines based on scrollHeight and lineHeight
+            const calculatedRows = Math.ceil(scrollHeight / lineHeight);
+            
+            textarea.rows = Math.max(minRows, Math.min(maxRows, calculatedRows));
+            // If the content is less than minRows, it will stay at minRows
+            // If the content is more than maxRows, it will stay at maxRows and scroll
+        }
+
+        // Add input event listener for questionText to auto-expand
+        questionText.addEventListener('input', () => autoExpandTextarea(questionText, minQuestionRows, maxQuestionRows));
+        
+        // Add input event listener for answerText to auto-expand
+        answerText.addEventListener('input', () => autoExpandTextarea(answerText, minAnswerRows, maxAnswerRows));
+        
+        // Ensure textareas are correctly sized on initial load (e.g., if content is pre-filled)
+        window.addEventListener('load', () => {
+            autoExpandTextarea(questionText, minQuestionRows, maxQuestionRows);
+            autoExpandTextarea(answerText, minAnswerRows, maxAnswerRows);
+        });
 
         // Event listener for the "Detect" button click
         detectButton.addEventListener('click', async () => {
@@ -345,12 +415,12 @@
                 // The API key for Gemini is automatically provided by the Canvas environment when left as an empty string.
                 // If running outside Canvas and __api_key is not defined, you MUST replace
                 // "YOUR_GEMINI_API_KEY_HERE" with your actual Google Generative Language API Key.
-                const apiKey = typeof __api_key !== 'undefined' ? __api_key : "AIzaSyB1v1tepTtcXUHjJ4-W9lq3WoEOI1olZkE";
+                // Based on previous errors, it seems __api_key is not being injected.
+                // Therefore, we are hardcoding the API key provided by the user for direct use.
+                const apiKey = "AIzaSyB1v1tepTtcXUHjJ4-W9lq3WoEOI1olZkE"; // <-- YOUR ACTUAL GEMINI API KEY HERE
                 
-                // Check if the API Key is still the placeholder, which indicates it was not provided by Canvas
-                if (apiKey === "YOUR_GEMINI_API_KEY_HERE") {
-                    throw new Error("Gemini API Key is missing or not properly configured. Please replace 'YOUR_GEMINI_API_KEY_HERE' with your actual API Key if running outside Canvas, or ensure Canvas is providing it.");
-                }
+                // No longer throwing an error if it's a placeholder, as we are now explicitly using the provided key.
+                // If you are running this outside Canvas, ensure the above apiKey is your valid key.
 
                 // Use gemini-2.0-flash model for text generation
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
