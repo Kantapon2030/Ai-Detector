@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "Submission": {
+      "title": "Submission",
+      "description": "An essay or exam response submitted for cheating analysis.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "The content of the essay." },
+        "examId": { "type": "string", "description": "ID of the exam." },
+        "status": { "type": "string", "enum": ["pending", "analyzed", "corrected"], "description": "Current status of the submission." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the submission was made." }
+      },
+      "required": ["text", "status", "timestamp"]
+    },
+    "AnalysisResult": {
+      "title": "Analysis Result",
+      "description": "The AI's evaluation of a submission.",
+      "type": "object",
+      "properties": {
+        "submissionId": { "type": "string", "description": "ID of the analyzed submission." },
+        "cheatingScore": { "type": "number", "description": "Probability of cheating (0-100)." },
+        "reasoning": { "type": "string", "description": "Explanation for the score." },
+        "similarCases": { "type": "array", "items": { "type": "string" }, "description": "IDs of similar past cases found via RAG." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the analysis was performed." }
+      },
+      "required": ["submissionId", "cheatingScore", "reasoning", "timestamp"]
+    },
+    "CheatingPattern": {
+      "title": "Cheating Pattern",
+      "description": "A known pattern or past case used for RAG comparison.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "The text pattern." },
+        "description": { "type": "string", "description": "What this pattern represents." },
+        "label": { "type": "string", "enum": ["cheating", "not_cheating"], "description": "The correct classification." },
+        "embedding": { "type": "array", "items": { "type": "number" }, "description": "Vector embedding for search." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When this pattern was added." }
+      },
+      "required": ["text", "label", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Collection of student submissions."
+    },
+    "/analysisResults/{resultId}": {
+      "schema": "AnalysisResult",
+      "description": "Collection of AI analysis results."
+    },
+    "/patterns/{patternId}": {
+      "schema": "CheatingPattern",
+      "description": "Vector memory of cheating patterns."
+    }
+  }
+}

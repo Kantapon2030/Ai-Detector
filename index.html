@@ -1,0 +1,504 @@
+<<<<<<< HEAD
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>พลิกเกมกลโกง: AI ตรวจจับคำตอบที่สร้างโดยปัญญาประดิษฐ์</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Import Inter font from Google Fonts for a modern look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        /* Custom background animation for a subtle, beautiful effect */
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh; /* Ensure full viewport height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem; /* Add some padding for smaller screens */
+            position: relative; /* Needed for absolute positioning of background layers */
+            /* Removed overflow: hidden; to allow scrolling */
+        }
+
+        /* Background image layer with blur */
+        .background-image-layer {
+            position: absolute;
+            inset: 0; /* Top, right, bottom, left to 0 */
+            background-image: url('https://lh3.googleusercontent.com/pw/AP1GczNVjUWnnYXNitwzScBtKn1A_JiSfiE8SKmrZr0x2geLDc0NjJSbS18jQRkGZHoGeI9KoyVfiVBV-jGq-KlFjUJe0b4ks6Ma0Mdv-wqHFtj6HfS__Pms=w2400'); /* Placeholder: Replace with your green grassland image URL */
+            background-size: cover;
+            background-position: center;
+            filter: blur(8px); /* Apply blur effect */
+            z-index: 0; /* Ensure it's behind other content */
+        }
+
+        /* Gradient overlay layer */
+        .gradient-overlay-layer {
+            position: absolute;
+            inset: 0; /* Top, right, bottom, left to 0 */
+            /* Animated gradient background with transparency */
+            background: linear-gradient(270deg, rgba(224, 242, 247, 0.7), rgba(200, 230, 201, 0.7), rgba(187, 222, 251, 0.7)); /* Light blues and greens with 70% opacity */
+            background-size: 600% 600%;
+            animation: gradientShift 15s ease infinite; /* Smooth, continuous animation */
+            z-index: 1; /* Above the image, below the content */
+        }
+
+        /* Custom modal styles for displaying messages */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed; /* Stay in place */
+            z-index: 1000; /* Sit on top of other elements */
+            left: 0;
+            top: 0;
+            width: 100%; /* Full width */
+            height: 100%; /* Full height */
+            overflow: auto; /* Enable scroll if content overflows */
+            background-color: rgba(0,0,0,0.4); /* Black background with opacity */
+            justify-content: center; /* Center modal content horizontally */
+            align-items: center; /* Center modal content vertically */
+        }
+        .modal-content {
+            background-color: #fefefe; /* White background for modal content */
+            margin: auto; /* Center the modal box */
+            padding: 20px;
+            border-radius: 12px; /* Rounded corners for the modal box */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* Subtle shadow */
+            max-width: 500px; /* Maximum width for the modal */
+            width: 90%; /* Responsive width */
+            text-align: center; /* Center text inside the modal */
+        }
+        .close-button {
+            color: #aaa; /* Light gray color for the close button */
+            float: right; /* Position to the right */
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: black; /* Darker color on hover/focus */
+            text-decoration: none;
+            cursor: pointer;
+        }
+        /* Styling for the custom file input label */
+        .file-input-label {
+            display: inline-block;
+            background-color: #e2e8f0; /* Light gray background */
+            color: #4a5568; /* Dark gray text */
+            padding: 8px 12px;
+            border-radius: 6px; /* Slightly rounded corners */
+            cursor: pointer;
+            font-size: 0.875rem; /* Smaller font size */
+            font-weight: 500;
+            transition: background-color 0.2s ease-in-out; /* Smooth transition for hover effect */
+        }
+        .file-input-label:hover {
+            background-color: #cbd5e1; /* Darker gray on hover */
+        }
+        .file-name {
+            /* Adjusted for better alignment */
+            margin-left: 8px; /* Small margin to separate from label */
+            font-size: 0.875rem;
+            color: #718096; /* Muted text color */
+            white-space: nowrap; /* Prevent file name from wrapping */
+            overflow: hidden; /* Hide overflow content */
+            text-overflow: ellipsis; /* Show ellipsis for overflow */
+            flex-grow: 1; /* Allow it to take available space */
+            max-width: 120px; /* Adjust as needed for smaller screens to prevent button overflow */
+        }
+
+        /* Enhanced loading spinner animation */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-spinner-enhanced {
+            animation: spin 1s linear infinite;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Image Layer -->
+    <div class="background-image-layer"></div>
+    <!-- Gradient Overlay Layer -->
+    <div class="gradient-overlay-layer"></div>
+
+    <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 hover:scale-[1.01] relative z-10">
+        <h1 class="text-5xl font-extrabold text-center text-gray-700 mb-2 drop-shadow-lg rounded-lg ">ZeroCheat</h1>
+        <h1 class="text-base font-bold text-center text-gray-700 mb-6">พลิกเกมกลโกง : AI ตรวจจับคำตอบที่สร้างโดยปัญญาประดิษฐ์</h1>
+
+
+        <!-- Question Input Section -->
+        <div class="mb-6">
+            <label for="questionText" class="block text-gray-700 text-sm font-semibold mb-2">ป้อนคำถาม (ไม่บังคับ):</label>
+            <textarea id="questionText" rows="1" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="ป้อนคำถามที่เกี่ยวข้องที่นี่..."></textarea>
+            <div class="mt-2 flex items-center flex-nowrap justify-between gap-2">
+                <label for="questionFileInput" class="file-input-label flex-shrink-0">
+                    แนบไฟล์คำถาม (.txt)
+                </label>
+                <input type="file" id="questionFileInput" accept=".txt" class="hidden">
+                <span id="questionFileName" class="file-name">ไม่มีไฟล์ที่เลือก</span>
+                <button id="clearQuestionButton" class="ml-auto bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-2 px-4 rounded-lg hover:from-red-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 flex-shrink-0">
+                    ล้างคำถาม
+                </button>
+            </div>
+        </div>
+
+        <!-- Answer Input Section -->
+        <div class="mb-6">
+            <label for="answerText" class="block text-gray-700 text-sm font-semibold mb-2">ป้อนคำตอบที่ต้องการตรวจสอบ:</label>
+            <textarea id="answerText" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y transition-all duration-200" placeholder="วางคำตอบที่นี่..."></textarea>
+            <div class="mt-2 flex items-center flex-nowrap justify-between gap-2">
+                <label for="answerFileInput" class="file-input-label flex-shrink-0">
+                    แนบไฟล์คำตอบ (.txt)
+                </label>
+                <input type="file" id="answerFileInput" accept=".txt" class="hidden">
+                <span id="answerFileName" class="file-name">ไม่มีไฟล์ที่เลือก</span>
+                <button id="clearAnswerButton" class="ml-auto bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-2 px-4 rounded-lg hover:from-red-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 flex-shrink-0">
+                    ล้างคำตอบ
+                </button>
+            </div>
+        </div>
+
+        <!-- Detect Button -->
+        <button id="detectButton" class="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 flex items-center justify-center">
+            <span id="buttonText">ตรวจจับ</span>
+            <span id="loadingSpinner" class="hidden loading-spinner-enhanced"></span>
+        </button>
+
+        <!-- Result Display Area -->
+        <div id="resultArea" class="mt-8 p-6 bg-gray-50 rounded-lg border border-gray-200 shadow-inner">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">ผลการตรวจจับ:</h2>
+            <p id="detectionResult" class="text-gray-700 text-lg leading-relaxed">
+                ผลลัพธ์จะแสดงที่นี่หลังจากที่คุณคลิกปุ่ม "ตรวจจับ"
+            </p>
+        </div>
+
+        <!-- AI Credit with Gemini Logo -->
+        <p class="text-center text-gray-500 text-sm mt-6 flex items-center justify-center">
+            AI powered by Gemini 
+        </p>
+
+        <!-- Custom Modal for Messages (replaces alert/confirm) -->
+        <div id="messageModal" class="modal">
+            <div class="modal-content">
+                <span class="close-button" id="closeModalButton">&times;</span>
+                <p id="modalMessage" class="text-lg font-medium text-gray-800"></p>
+                <button id="modalOkButton" class="mt-4 bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200">ตกลง</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Firebase imports for authentication and potentially future data storage
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Get references to DOM elements for interaction
+        const questionText = document.getElementById('questionText');
+        const questionFileInput = document.getElementById('questionFileInput');
+        const questionFileName = document.getElementById('questionFileName');
+        const answerText = document.getElementById('answerText');
+        const answerFileInput = document.getElementById('answerFileInput');
+        const answerFileName = document.getElementById('answerFileName');
+        const detectButton = document.getElementById('detectButton');
+        const buttonText = document.getElementById('buttonText');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const detectionResult = document.getElementById('detectionResult');
+        const messageModal = document.getElementById('messageModal');
+        const modalMessage = document.getElementById('modalMessage');
+        const closeModalButton = document.getElementById('closeModalButton');
+        const modalOkButton = document.getElementById('modalOkButton');
+        const clearAnswerButton = document.getElementById('clearAnswerButton'); 
+        const clearQuestionButton = document.getElementById('clearQuestionButton'); // New: Clear Question Button
+
+        // Firebase variables
+        let app;
+        let db;
+        let auth;
+        let userId = 'anonymous'; // Default to anonymous user ID
+
+        // Function to display custom modal messages
+        function showModal(message) {
+            modalMessage.textContent = message; // Set the message text
+            modalMessage.style.display = 'flex'; // Show the modal using flexbox for centering
+        }
+
+        // Event listeners for modal buttons to close the modal
+        closeModalButton.onclick = function() {
+            messageModal.style.display = 'none';
+        }
+        modalOkButton.onclick = function() {
+            messageModal.style.display = 'none';
+        }
+        // Close modal if user clicks outside of it
+        window.onclick = function(event) {
+            if (event.target == messageModal) {
+                messageModal.style.display = 'none';
+            }
+        }
+
+        // Function to handle reading content from a file input
+        function handleFileRead(fileInput, textArea, fileNameSpan) {
+            const file = fileInput.files[0];
+            if (file) {
+                // Only allow .txt files based on both type and extension
+                const isTxtFile = file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
+
+                if (!isTxtFile) {
+                    showModal(`ไฟล์ประเภท "${file.name.split('.').pop()}" ไม่สามารถอ่านเป็นข้อความธรรมดาได้ กรุณาเลือกไฟล์ .txt เท่านั้น`);
+                    fileInput.value = ''; // Clear the input
+                    fileNameSpan.textContent = 'ไม่มีไฟล์ที่เลือก';
+                    return;
+                }
+
+                fileNameSpan.textContent = file.name; // Display the selected file name
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    textArea.value = e.target.result; // Populate textarea with file content
+                    // Trigger input event to adjust textarea rows if content is loaded from file
+                    const event = new Event('input', { bubbles: true });
+                    textArea.dispatchEvent(event);
+                };
+                reader.onerror = () => {
+                    showModal("เกิดข้อผิดพลาดในการอ่านไฟล์"); // Show error if file reading fails
+                    fileNameSpan.textContent = 'ไม่มีไฟล์ที่เลือก';
+                };
+                reader.readAsText(file); // Read the file as text
+            } else {
+                fileNameSpan.textContent = 'ไม่มีไฟล์ที่เลือก'; // Reset file name display if no file is selected
+            }
+        }
+
+        // Add event listeners for file input changes
+        questionFileInput.addEventListener('change', () => handleFileRead(questionFileInput, questionText, questionFileName));
+        answerFileInput.addEventListener('change', () => handleFileRead(answerFileInput, answerText, answerFileName));
+
+        // Event listener for Clear Question button (New)
+        clearQuestionButton.addEventListener('click', () => {
+            questionText.value = ''; // Clear the textarea
+            questionFileInput.value = ''; // Clear the file input
+            questionFileName.textContent = 'ไม่มีไฟล์ที่เลือก'; // Reset file name display
+            questionText.rows = 1; // Reset question textarea rows
+        });
+
+        // Event listener for Clear Answer button
+        clearAnswerButton.addEventListener('click', () => {
+            answerText.value = ''; // Clear the textarea
+            answerFileInput.value = ''; // Clear the file input
+            answerFileName.textContent = 'ไม่มีไฟล์ที่เลือก'; // Reset file name display
+            detectionResult.textContent = 'ผลลัพธ์จะแสดงที่นี่หลังจากที่คุณคลิกปุ่ม "ตรวจจับ"'; // Reset result area
+            answerText.rows = 6; // Reset answer textarea rows
+        });
+
+        // Initialize Firebase and authenticate the user (anonymous or with custom token)
+        async function initializeFirebaseAndAuth() {
+            try {
+                // Firebase configuration: Prioritize Canvas-provided config if available.
+                // If running outside Canvas, use the hardcoded configuration provided by the user.
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+                    apiKey: "AIzaSyBEmmf6snmdD8yVIZU2h5q9rqt8WnXLHug",
+                    authDomain: "ai-text-detector-602c6.firebaseapp.com",
+                    projectId: "ai-text-detector-602c6",
+                    storageBucket: "ai-text-detector-602c6.firebasestorage.app",
+                    messagingSenderId: "724703050953",
+                    appId: "1:724703050953:web:6eff34a5d07321484f2118"
+                    // measurementId is optional and not needed for core functionality here
+                };
+
+                // Initialize Firebase app
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app); // Get Firestore instance
+                auth = getAuth(app); // Get Auth instance
+
+                // Authenticate user: use custom token if available (from Canvas), otherwise sign in anonymously
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                userId = auth.currentUser?.uid || crypto.randomUUID(); // Set user ID
+                console.log("Firebase initialized and user authenticated. User ID:", userId);
+            } catch (error) {
+                console.error("Error initializing Firebase or authenticating:", error);
+                showModal("เกิดข้อผิดพลาดในการเริ่มต้น Firebase: " + error.message);
+            }
+        }
+
+        // Call the Firebase initialization function when the script loads
+        initializeFirebaseAndAuth();
+
+        // Constants for textarea auto-expansion
+        const minQuestionRows = 1;
+        const maxQuestionRows = 4;
+        const minAnswerRows = 6;
+        const maxAnswerRows = 20;
+
+        // Function to auto-expand textarea based on content
+        function autoExpandTextarea(textarea, minRows, maxRows) {
+            // Temporarily set rows to 1 to get the true scrollHeight
+            textarea.rows = 1;
+            const scrollHeight = textarea.scrollHeight;
+            const lineHeight = parseInt(window.getComputedStyle(textarea).lineHeight);
+            
+            // Calculate number of lines based on scrollHeight and lineHeight
+            const calculatedRows = Math.ceil(scrollHeight / lineHeight);
+            
+            textarea.rows = Math.max(minRows, Math.min(maxRows, calculatedRows));
+            // If the content is less than minRows, it will stay at minRows
+            // If the content is more than maxRows, it will stay at maxRows and scroll
+        }
+
+        // Add input event listener for questionText to auto-expand
+        questionText.addEventListener('input', () => autoExpandTextarea(questionText, minQuestionRows, maxQuestionRows));
+        
+        // Add input event listener for answerText to auto-expand
+        answerText.addEventListener('input', () => autoExpandTextarea(answerText, minAnswerRows, maxAnswerRows));
+        
+        // Ensure textareas are correctly sized on initial load (e.g., if content is pre-filled)
+        window.addEventListener('load', () => {
+            autoExpandTextarea(questionText, minQuestionRows, maxQuestionRows);
+            autoExpandTextarea(answerText, minAnswerRows, maxAnswerRows);
+        });
+
+        // Event listener for the "Detect" button click
+        detectButton.addEventListener('click', async () => {
+            const question = questionText.value.trim(); // Get trimmed question text
+            const answer = answerText.value.trim(); // Get trimmed answer text
+
+            // Validate if an answer is provided
+            if (!answer) {
+                showModal("กรุณาป้อนคำตอบที่ต้องการตรวจสอบ");
+                return;
+            }
+
+            // Show loading indicator and disable button during processing
+            buttonText.textContent = 'กำลังตรวจจับ...';
+            loadingSpinner.classList.remove('hidden');
+            detectButton.disabled = true;
+            detectionResult.textContent = 'กำลังวิเคราะห์ข้อความ...'; // Update result area with processing message
+
+            try {
+                // Construct the prompt for the AI model (Gemini-2.0-Flash)
+                let prompt = `คุณเป็นเครื่องมือตรวจจับ AI ที่เชี่ยวชาญและสามารถระบุลักษณะเฉพาะของข้อความที่สร้างโดย AI รุ่นต่างๆ เช่น Gemini, ChatGPT, หรือ Claude โปรดวิเคราะห์ข้อความตอบกลับต่อไปนี้ที่อาจเกี่ยวข้องกับคำถามที่ให้มา และระบุว่าข้อความตอบกลับนี้ถูกสร้างโดยปัญญาประดิษฐ์ (AI) หรือเขียนโดยมนุษย์ (Human) ให้ความมั่นใจในการตรวจจับเป็นเปอร์เซ็นต์ และให้เหตุผลสั้นๆ โดยอ้างอิงถึงลักษณะของ AI รุ่นต่างๆ หากเป็นไปได้
+                โปรดตอบกลับอย่างกระชับที่สุด โดยระบุเพียงประเภท ความมั่นใจ และเหตุผลสั้นๆ เท่านั้น ไม่ต้องมีคำอธิบายเพิ่มเติมหรือบทนำใดๆ
+
+                `;
+
+                // Add question to prompt if provided
+                if (question) {
+                    prompt += `คำถาม: "${question}"\n`;
+                }
+                // Add answer to prompt
+                prompt += `คำตอบที่ต้องการตรวจสอบ: "${answer}"\n`;
+                // Define the desired output format for the AI
+                prompt += `รูปแบบการตอบกลับ:
+                ประเภท: [AI/Human]
+                ความมั่นใจ: [XX%]
+                เหตุผล: [เหตุผลสั้นๆ ที่อ้างอิงถึงลักษณะของ AI รุ่นต่างๆ หากเป็นไปได้]`;
+
+                // The API key for Gemini is automatically provided by the Canvas environment when left as an empty string.
+                // If running outside Canvas and __api_key is not defined, you MUST replace
+                // "YOUR_GEMINI_API_KEY_HERE" with your actual Google Generative Language API Key.
+                // Based on previous errors, it seems __api_key is not being injected.
+                // Therefore, we are hardcoding the API key provided by the user for direct use.
+                const apiKey = "AIzaSyB1v1tepTtcXUHjJ4-W9lq3WoEOI1olZkE"; // <-- YOUR ACTUAL GEMINI API KEY HERE
+                
+                // No longer throwing an error if it's a placeholder, as we are now explicitly using the provided key.
+                // If you are running this outside Canvas, ensure the above apiKey is your valid key.
+
+                // Use gemini-2.0-flash model for text generation
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                // Prepare the payload for the Gemini API call
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+
+
+                // Make the fetch call to the Gemini API
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json(); // Parse the JSON response
+                console.log("Gemini API Response:", result); // Log the full API response for debugging
+
+                // Process and display the AI's detection result
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    let aiResponseText = result.candidates[0].content.parts[0].text;
+                    
+                    // Add emoji based on detection type
+                    if (aiResponseText.includes("ประเภท: AI")) {
+                        aiResponseText = "🤖 " + aiResponseText;
+                    } else if (aiResponseText.includes("ประเภท: Human")) {
+                        aiResponseText = "🧑‍💻 " + aiResponseText;
+                    }
+                    detectionResult.textContent = aiResponseText; // Display AI's response
+                } else {
+                    // Handle cases where the response structure is unexpected or content is missing
+                    let errorMessage = 'ไม่สามารถตรวจจับได้: ไม่ได้รับคำตอบที่ถูกต้องจาก AI';
+                    if (result.error) {
+                        // If the API returned an explicit error
+                        errorMessage = `เกิดข้อผิดพลาดจาก Gemini API: ${result.error.message || 'ไม่ทราบข้อผิดพลาด'}`;
+                    } else if (result.promptFeedback && result.promptFeedback.blockReason) {
+                        // If content was blocked due to safety settings
+                        errorMessage = `ข้อความถูกบล็อกโดย AI: ${result.promptFeedback.blockReason} (อาจเป็นเนื้อหาที่ไม่เหมาะสมหรือไม่ปลอดภัย)`;
+                    } else if (result.candidates && result.candidates.length === 0) {
+                        // If no candidates were returned (e.g., due to content filtering without explicit blockReason)
+                        errorMessage = 'ไม่สามารถสร้างคำตอบได้: ไม่มีผู้สมัคร (candidates) จาก AI (อาจถูกกรองเนื้อหา)';
+                    }
+                    detectionResult.textContent = errorMessage;
+                    console.error("Unexpected API response structure or error:", result);
+                    showModal(errorMessage);
+                }
+            } catch (error) {
+                // Handle any errors during the API call (e.g., network issues)
+                console.error("Error detecting AI text:", error);
+                detectionResult.textContent = `เกิดข้อผิดพลาดในการตรวจจับ: ${error.message}`;
+                showModal("เกิดข้อผิดพลาดในการตรวจจับ: " + error.message);
+            } finally {
+                // Always hide loading indicator and re-enable the button after processing
+                buttonText.textContent = 'ตรวจจับ';
+                loadingSpinner.classList.add('hidden');
+                detectButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
+=======
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+>>>>>>> ebfa93b (Initial commit: ระบบพลิกเกมกลโกง v2.0)
