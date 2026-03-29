@@ -17,7 +17,7 @@ const GaugeMeter: React.FC<GaugeMeterProps> = ({ score, label }) => {
   const COLORS = ['#ef4444', '#22c55e'];
 
   return (
-    <div className="w-full h-64 flex flex-col items-center justify-center">
+    <div className="w-full h-48 md:h-64 flex flex-col items-center justify-center">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
@@ -41,8 +41,8 @@ const GaugeMeter: React.FC<GaugeMeterProps> = ({ score, label }) => {
             <Label
               value={`${score}%`}
               position="center"
-              className="text-4xl font-black fill-zinc-900"
-              style={{ transform: 'translateY(35px)' }}
+              className="text-2xl md:text-4xl font-black fill-zinc-900"
+              style={{ transform: 'translateY(20px)' }}
             />
           </Pie>
         </PieChart>

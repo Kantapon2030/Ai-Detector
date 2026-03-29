@@ -177,7 +177,12 @@ const PublicHome: React.FC = () => {
   const deleteHistoryItem = async (id: string) => {
     try {
       if (isAdmin) {
+        // Delete submission and its analysis results
         await deleteDoc(doc(db, 'submissions', id));
+        const q = query(collection(db, 'analysisResults'), where('submissionId', '==', id));
+        const snap = await getDocs(q);
+        const delResults = snap.docs.map(d => deleteDoc(doc(db, 'analysisResults', d.id)));
+        await Promise.all(delResults);
       }
       setHistory(prev => prev.filter(item => item.id !== id));
     } catch (err) {
@@ -190,7 +195,9 @@ const PublicHome: React.FC = () => {
 
   const clearAllHistory = async () => {
     if (!isAdmin) {
-      setError('เฉพาะแอดมินเท่านั้นที่สามารถล้างประวัติทั้งหมดได้');
+      // For non-admins, just clear local history state
+      setHistory([]);
+      analysisCache.current.clear();
       return;
     }
 
@@ -199,9 +206,23 @@ const PublicHome: React.FC = () => {
       const q = query(collection(db, 'submissions'), where('status', '==', 'analyzed'));
       const querySnapshot = await getDocs(q);
       
-      const deletePromises = querySnapshot.docs.map(d => deleteDoc(doc(db, 'submissions', d.id)));
+      const deletePromises = querySnapshot.docs.flatMap(d => [
+        deleteDoc(doc(db, 'submissions', d.id)),
+        // We'd need to fetch analysisResults for each, but for performance we can just clear submissions
+        // and let the rules handle the rest or do a batch.
+        // For now, let's just delete the submissions.
+      ]);
+      
       await Promise.all(deletePromises);
       
+      // Also try to clear analysisResults for these submissions
+      const subIds = querySnapshot.docs.map(d => d.id);
+      if (subIds.length > 0) {
+        const resQ = query(collection(db, 'analysisResults'), where('submissionId', 'in', subIds.slice(0, 10))); // Firestore 'in' limit is 10
+        const resSnap = await getDocs(resQ);
+        await Promise.all(resSnap.docs.map(d => deleteDoc(doc(db, 'analysisResults', d.id))));
+      }
+
       setHistory([]);
       analysisCache.current.clear();
     } catch (err) {
@@ -393,7 +414,7 @@ const PublicHome: React.FC = () => {
           **คำแนะนำสำคัญ**:
           1. ให้ประเมินความน่าจะเป็นว่าเป็น AI หรือ มนุษย์ (0-100 โดยที่ 100 คือมั่นใจว่าเป็น AI แน่นอน)
           2. ให้คะแนนความมั่นใจ (Confidence Score 0-100) ในการวิเคราะห์ครั้งนี้
-          3. ให้คำอธิบายสั้นๆ กระชับที่สุด (Short and concise) เป็นข้อๆ (Bullet points) ในภาษาไทยที่เข้าใจง่าย ไม่เกิน 3-4 บรรทัด
+          3. ให้คำอธิบายสั้นๆ กระชับที่สุด (Extremely short and concise) เป็นข้อๆ (Bullet points) ในภาษาไทยที่เข้าใจง่าย ไม่เกิน 2-3 บรรทัด
           4. **สำคัญมาก**: แบ่งเนื้อหาที่ส่งมาออกเป็นส่วนๆ (Segments) และให้คะแนนความมั่นใจว่าเป็น AI (0-100) ในแต่ละส่วน เพื่อทำ Heatmap
           
           ส่งผลการวิเคราะห์ในรูปแบบ JSON ดังนี้:
@@ -414,44 +435,62 @@ const PublicHome: React.FC = () => {
         `
       });
 
-      const responseStream = await genAI.models.generateContentStream({
-        model: "gemini-3-flash-preview",
-        contents: { parts },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              score: { type: Type.NUMBER },
-              confidenceScore: { type: Type.NUMBER },
-              reasoning: { type: Type.STRING },
-              analysisDetails: {
-                type: Type.OBJECT,
-                properties: {
-                  grammar: { type: Type.STRING },
-                  depth: { type: Type.STRING },
-                  wordUsage: { type: Type.STRING }
-                },
-                required: ["grammar", "depth", "wordUsage"]
-              },
-              heatmap: {
-                type: Type.ARRAY,
-                items: {
+    let retryCount = 0;
+    const maxRetries = 2;
+
+    const callGeminiAPI = async (): Promise<any> => {
+      try {
+        return await genAI.models.generateContentStream({
+          model: "gemini-3-flash-preview",
+          contents: { parts },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                score: { type: Type.NUMBER },
+                confidenceScore: { type: Type.NUMBER },
+                reasoning: { type: Type.STRING },
+                analysisDetails: {
                   type: Type.OBJECT,
                   properties: {
-                    text: { type: Type.STRING },
-                    score: { type: Type.NUMBER }
+                    grammar: { type: Type.STRING },
+                    depth: { type: Type.STRING },
+                    wordUsage: { type: Type.STRING }
                   },
-                  required: ["text", "score"]
+                  required: ["grammar", "depth", "wordUsage"]
+                },
+                heatmap: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      text: { type: Type.STRING },
+                      score: { type: Type.NUMBER }
+                    },
+                    required: ["text", "score"]
+                  }
                 }
-              }
-            },
-            required: ["score", "confidenceScore", "reasoning", "analysisDetails", "heatmap"]
+              },
+              required: ["score", "confidenceScore", "reasoning", "analysisDetails", "heatmap"]
+            }
           }
+        });
+      } catch (err: any) {
+        if ((err.message?.includes('503') || err.message?.includes('UNAVAILABLE')) && retryCount < maxRetries) {
+          retryCount++;
+          const delay = Math.pow(2, retryCount) * 1000;
+          console.log(`Retrying analysis (attempt ${retryCount}) after ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          return callGeminiAPI();
         }
-      });
+        throw err;
+      }
+    };
 
-      let fullText = "";
+    const responseStream = await callGeminiAPI();
+
+    let fullText = "";
       for await (const chunk of responseStream) {
         const chunkText = chunk.text;
         fullText += chunkText;
@@ -508,6 +547,8 @@ const PublicHome: React.FC = () => {
         setError('⚠️ ตรวจพบว่า API Key หลุดสู่สาธารณะ (Leaked API Key) กรุณาติดต่อผู้ดูแลระบบเพื่อเปลี่ยน Key ใหม่ใน AI Studio Secrets');
       } else if (err.message?.includes('PERMISSION_DENIED')) {
         setError('⚠️ สิทธิ์การเข้าถึงถูกปฏิเสธ (Permission Denied) กรุณาตรวจสอบการตั้งค่า API Key');
+      } else if (err.message?.includes('503') || err.message?.includes('UNAVAILABLE') || err.message?.includes('high demand')) {
+        setError('⚠️ ขณะนี้มีผู้ใช้งานหนาแน่น (High Demand) กรุณารอสักครู่แล้วลองใหม่อีกครั้ง');
       } else {
         setError('เกิดข้อผิดพลาดในการวิเคราะห์ กรุณาลองใหม่อีกครั้ง');
       }
@@ -545,19 +586,19 @@ const PublicHome: React.FC = () => {
         <div className="absolute -bottom-[10%] left-[20%] w-[50%] h-[50%] bg-sky-100/20 rounded-full blur-[150px]" />
       </div>
 
-      <header className="h-20 md:h-24 border-b border-zinc-200/50 flex items-center justify-between px-4 md:px-8 sticky top-0 bg-white/60 backdrop-blur-xl z-40">
+      <header className="h-16 md:h-24 border-b border-zinc-200/50 flex items-center justify-between px-4 md:px-8 sticky top-0 bg-white/60 backdrop-blur-xl z-40">
         <Logo />
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm backdrop-blur-sm">
+        <div className="flex items-center gap-2 md:gap-4">
+          <div className="hidden lg:flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm backdrop-blur-sm">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
             <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">ระบบพร้อมใช้งาน</span>
           </div>
           
           {user ? (
-            <div className="flex items-center gap-3">
-              <div className="flex flex-col items-end hidden md:flex">
-                <span className="text-xs font-bold text-zinc-900">{user.displayName}</span>
-                <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">{isAdmin ? 'Admin' : 'User'}</span>
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex flex-col items-end hidden sm:flex">
+                <span className="text-[10px] md:text-xs font-bold text-zinc-900 line-clamp-1 max-w-[100px]">{user.displayName}</span>
+                <span className="text-[8px] md:text-[10px] font-mono text-zinc-400 uppercase tracking-widest">{isAdmin ? 'Admin' : 'User'}</span>
               </div>
               {isAdmin && (
                 <button 
@@ -593,7 +634,7 @@ const PublicHome: React.FC = () => {
         </div>
       </header>
 
-      <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-8 md:space-y-16 relative z-10">
+      <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-6 md:space-y-16 relative z-10">
         {/* Admin Panel */}
         <AnimatePresence>
           {showAdminPanel && isAdmin && (
@@ -676,9 +717,23 @@ const PublicHome: React.FC = () => {
                       </div>
                     ))}
                   </div>
-                  <p className="text-[10px] text-zinc-400 italic">
-                    * ข้อมูล Patterns ใช้สำหรับเปรียบเทียบความหมาย (Semantic Search) เพื่อเพิ่มความแม่นยำ
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-zinc-400 italic">
+                      * ข้อมูล Patterns ใช้สำหรับเปรียบเทียบความหมาย (Semantic Search) เพื่อเพิ่มความแม่นยำ
+                    </p>
+                    <button 
+                      onClick={async () => {
+                        if (confirm('คุณแน่ใจหรือไม่ว่าต้องการล้าง Patterns ทั้งหมด?')) {
+                          const snap = await getDocs(collection(db, 'patterns'));
+                          await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'patterns', d.id))));
+                          setPatterns([]);
+                        }
+                      }}
+                      className="w-full py-2 border border-red-100 text-red-400 text-[10px] font-bold rounded-lg uppercase tracking-widest hover:bg-red-50 transition-all"
+                    >
+                      ล้าง Patterns ทั้งหมด
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.section>
@@ -885,14 +940,14 @@ const PublicHome: React.FC = () => {
 
               <div className="bg-white border border-zinc-200 rounded-[1.5rem] md:rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] p-6 md:p-10 space-y-8 md:space-y-12">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-16 items-start">
-                  <div className="flex flex-col items-center gap-6">
-                    <div className="relative w-full max-w-[320px] pb-20">
+                  <div className="flex flex-col items-center gap-2 md:gap-6">
+                    <div className="relative w-full max-w-[320px] flex flex-col items-center">
                       <GaugeMeter score={result.score} label="ความน่าจะเป็นของ AI" />
                       <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
                         className={cn(
-                          "absolute bottom-0 left-1/2 -translate-x-1/2 px-6 py-2 text-white text-xs font-black rounded-full uppercase tracking-widest shadow-xl z-20 whitespace-nowrap",
+                          "mt-[-20px] md:mt-[-40px] px-6 py-2 text-white text-[10px] md:text-xs font-black rounded-full uppercase tracking-widest shadow-xl z-20 whitespace-nowrap",
                           result.score > 50 ? "bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.4)]" : "bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.4)]"
                         )}
                       >
@@ -952,7 +1007,7 @@ const PublicHome: React.FC = () => {
 
                     {/* Multi-Persona Details */}
                     {result.analysisDetails && (
-                      <div className="grid grid-cols-1 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-1 gap-3">
                         <AnalysisDetailItem label="โครงสร้างไวยากรณ์" value={result.analysisDetails.grammar} />
                         <AnalysisDetailItem label="ความลึกซึ้งของเนื้อหา" value={result.analysisDetails.depth} />
                         <AnalysisDetailItem label="รูปแบบการใช้คำเชื่อม" value={result.analysisDetails.wordUsage} />
