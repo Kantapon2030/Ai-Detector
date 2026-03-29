@@ -61,6 +61,7 @@ interface AnalysisResult {
     depth: string;
     wordUsage: string;
   };
+  modelUsed?: string;
 }
 
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -95,9 +96,18 @@ const PublicHome: React.FC = () => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [patterns, setPatterns] = useState<any[]>([]);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<'auto' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' | 'gemini-3.1-flash-live-preview'>('auto');
+  const [actualModelUsed, setActualModelUsed] = useState<string>('');
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
+
+  const hashText = async (text: string) => {
+    const msgUint8 = new TextEncoder().encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
 
   // Auth listener
   React.useEffect(() => {
@@ -281,6 +291,8 @@ const PublicHome: React.FC = () => {
     
     // 0. Client-side Cache Check
     const cacheKey = inputText.trim();
+    const textHash = cacheKey ? await hashText(cacheKey) : null;
+    
     if (cacheKey && !file && analysisCache.current.has(cacheKey)) {
       const cached = analysisCache.current.get(cacheKey)!;
       setResult(cached);
@@ -300,11 +312,11 @@ const PublicHome: React.FC = () => {
       let promptText = inputText;
       let parts: any[] = [];
 
-      // 1. Server-side Caching Check (Exact match)
-      if (inputText && !file) {
+      // 1. Server-side Caching Check (Exact match via Hash)
+      if (textHash && !file) {
         const q = query(
           collection(db, 'submissions'), 
-          where('text', '==', inputText),
+          where('textHash', '==', textHash),
           where('status', '==', 'analyzed'),
           limit(1)
         );
@@ -367,6 +379,26 @@ const PublicHome: React.FC = () => {
         }
       }
 
+      // 1.5 Adaptive Truncation
+      let finalPromptText = promptText;
+      if (promptText.length > 10000) {
+        const head = promptText.slice(0, 4000);
+        const middle = promptText.slice(Math.floor(promptText.length / 2) - 1000, Math.floor(promptText.length / 2) + 1000);
+        const tail = promptText.slice(-4000);
+        finalPromptText = `${head}\n\n[...ส่วนกลางที่ถูกตัดออก...]\n\n${middle}\n\n[...ส่วนท้ายที่ถูกตัดออก...]\n\n${tail}`;
+      }
+
+      // 1.6 Smart Routing
+      let modelToUse: string = selectedModel;
+      if (selectedModel === 'auto') {
+        if (promptText.length < 1500 && !file) {
+          modelToUse = 'gemini-3.1-flash-lite-preview';
+        } else {
+          modelToUse = 'gemini-3-flash-preview';
+        }
+      }
+      setActualModelUsed(modelToUse);
+
       // 2. RAG & Text Truncation
       let ragContext = "";
       if (promptText) {
@@ -398,41 +430,7 @@ const PublicHome: React.FC = () => {
       }
 
       parts.push({
-        text: `
-          คุณคือคณะกรรมการผู้เชี่ยวชาญด้านความโปร่งใสทางวิชาการ (Multi-Persona Analysis)
-          วิเคราะห์ข้อความหรือไฟล์ต่อไปนี้เพื่อหาโอกาสในการทุจริตหรือการใช้ AI สร้างข้อความ
-          
-          เนื้อหาที่ส่งมา:
-          ${promptText}
-          ${ragContext}
-          
-          **เกณฑ์การวิเคราะห์ (วิเคราะห์แยกเป็น 3 ส่วน)**:
-          1. โครงสร้างไวยากรณ์ (Grammar Structure): วิเคราะห์ความสมบูรณ์ ความเป็นธรรมชาติ หรือความซ้ำซ้อนที่เป็นเอกลักษณ์ของ AI
-          2. ความลึกซึ้งของเนื้อหา (Depth of Content): วิเคราะห์ความหมายเชิงลึก การโต้แย้ง และความสอดคล้องของเนื้อหา
-          3. รูปแบบการใช้คำเชื่อม (Word Usage): วิเคราะห์ความถี่ของคำเชื่อมและรูปแบบการเรียงประโยค
-          
-          **คำแนะนำสำคัญ**:
-          1. ให้ประเมินความน่าจะเป็นว่าเป็น AI หรือ มนุษย์ (0-100 โดยที่ 100 คือมั่นใจว่าเป็น AI แน่นอน)
-          2. ให้คะแนนความมั่นใจ (Confidence Score 0-100) ในการวิเคราะห์ครั้งนี้
-          3. ให้คำอธิบายสั้นๆ กระชับที่สุด (Extremely short and concise) เป็นข้อๆ (Bullet points) ในภาษาไทยที่เข้าใจง่าย ไม่เกิน 2-3 บรรทัด
-          4. **สำคัญมาก**: แบ่งเนื้อหาที่ส่งมาออกเป็นส่วนๆ (Segments) และให้คะแนนความมั่นใจว่าเป็น AI (0-100) ในแต่ละส่วน เพื่อทำ Heatmap
-          
-          ส่งผลการวิเคราะห์ในรูปแบบ JSON ดังนี้:
-          {
-            "score": number,
-            "confidenceScore": number,
-            "reasoning": "ข้อความสรุปเหตุผลรวม (ใช้รูปแบบ Markdown) เป็นภาษาไทยที่เข้าใจง่าย",
-            "analysisDetails": {
-              "grammar": "สรุปผลด้านไวยากรณ์",
-              "depth": "สรุปผลด้านความลึกซึ้ง",
-              "wordUsage": "สรุปผลด้านการใช้คำ"
-            },
-            "heatmap": [
-              { "text": "ส่วนของข้อความ", "score": number },
-              ...
-            ]
-          }
-        `
+        text: `วิเคราะห์เนื้อหาต่อไปนี้:\n${finalPromptText}\n${ragContext}`
       });
 
     let retryCount = 0;
@@ -441,9 +439,22 @@ const PublicHome: React.FC = () => {
     const callGeminiAPI = async (): Promise<any> => {
       try {
         return await genAI.models.generateContentStream({
-          model: "gemini-3-flash-preview",
+          model: modelToUse,
           contents: { parts },
           config: {
+            systemInstruction: `
+              คุณคือผู้เชี่ยวชาญด้านความโปร่งใสทางวิชาการ วิเคราะห์ข้อความเพื่อหาโอกาสในการใช้ AI สร้างข้อความ
+              เกณฑ์: 1.ไวยากรณ์ 2.ความลึกซึ้ง 3.การใช้คำเชื่อม
+              
+              ตอบเป็น JSON เท่านั้น (ห้ามมีคำเกริ่นนำ):
+              {
+                "score": 0-100 (100=AI),
+                "confidenceScore": 0-100,
+                "reasoning": "สรุปสั้นๆ 2-3 บรรทัด (Markdown) ภาษาไทย",
+                "analysisDetails": { "grammar": "...", "depth": "...", "wordUsage": "..." },
+                "heatmap": [{ "text": "...", "score": 0-100 }]
+              }
+            `,
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -511,6 +522,7 @@ const PublicHome: React.FC = () => {
       }
 
       const analysisResult: AnalysisResult = JSON.parse(fullText);
+      analysisResult.modelUsed = modelToUse;
       setResult(analysisResult);
       setStreamingReasoning(analysisResult.reasoning);
       
@@ -522,6 +534,7 @@ const PublicHome: React.FC = () => {
       // Parallel Firebase Storage (Faster Performance)
       const subRefPromise = addDoc(collection(db, 'submissions'), {
         text: promptText || `[File: ${file?.name}]`,
+        textHash: textHash,
         status: 'analyzed',
         timestamp: new Date().toISOString(),
         isAnonymous: true,
@@ -538,6 +551,7 @@ const PublicHome: React.FC = () => {
         reasoning: analysisResult.reasoning,
         analysisDetails: analysisResult.analysisDetails,
         heatmap: analysisResult.heatmap,
+        modelUsed: modelToUse,
         timestamp: new Date().toISOString()
       });
 
@@ -794,35 +808,22 @@ const PublicHome: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
-                  <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest">อัปโหลดไฟล์ (DOCX, PDF, PNG)</label>
-                  <div className="flex gap-4">
-                    <div className="relative flex-1">
-                      <input 
-                        type="file" 
-                        id="file-upload"
-                        className="hidden"
-                        onChange={handleFileChange}
-                        accept=".docx,.pdf,.png"
-                      />
-                      <label 
-                        htmlFor="file-upload"
-                        className="flex items-center justify-center gap-3 w-full py-4 border-2 border-dashed border-zinc-200 rounded-2xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
-                      >
-                        <motion.div
-                          whileHover={{ y: -4 }}
-                          whileTap={{ scale: 0.95 }}
-                        >
-                          <Upload className="w-5 h-5 text-zinc-400 group-hover:text-blue-500 transition-colors" />
-                        </motion.div>
-                        <span className="text-sm font-medium text-zinc-500 group-hover:text-blue-600">
-                          {file ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์เพื่ออัปโหลด'}
-                        </span>
-                      </label>
-                    </div>
+                  <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest">การกำหนดค่า AI Model</label>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <select 
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value as any)}
+                      className="flex-1 px-4 py-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-sm font-medium text-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="auto">🤖 Auto Routing (แนะนำ)</option>
+                      <option value="gemini-3.1-flash-lite-preview">⚡ Gemini 3.1 Flash Lite (เร็ว/ประหยัด)</option>
+                      <option value="gemini-3-flash-preview">🎯 Gemini 3 Flash (แม่นยำสูง)</option>
+                      <option value="gemini-3.1-flash-live-preview">🔥 Gemini 3.1 Flash Live (สดใหม่)</option>
+                    </select>
                     {(inputText || file) && (
                       <button 
                         onClick={clearForm}
-                        className="px-6 py-4 border border-zinc-200 rounded-2xl text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900 transition-all flex items-center gap-2 font-bold text-sm"
+                        className="px-6 py-4 border border-zinc-200 rounded-2xl text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900 transition-all flex items-center justify-center gap-2 font-bold text-sm"
                       >
                         <RefreshCw className="w-4 h-4" />
                         ล้างข้อมูล
@@ -830,6 +831,34 @@ const PublicHome: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                <div className="space-y-4">
+                  <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest">อัปโหลดไฟล์ (DOCX, PDF, PNG)</label>
+                  <div className="relative">
+                    <input 
+                      type="file" 
+                      id="file-upload"
+                      className="hidden"
+                      onChange={handleFileChange}
+                      accept=".docx,.pdf,.png"
+                    />
+                    <label 
+                      htmlFor="file-upload"
+                      className="flex items-center justify-center gap-3 w-full py-4 border-2 border-dashed border-zinc-200 rounded-2xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
+                    >
+                      <motion.div
+                        whileHover={{ y: -4 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        <Upload className="w-5 h-5 text-zinc-400 group-hover:text-blue-500 transition-colors" />
+                      </motion.div>
+                      <span className="text-sm font-medium text-zinc-500 group-hover:text-blue-600">
+                        {file ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์เพื่ออัปโหลด'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
 
                 <div className="flex items-end">
                   <AnimatePresence>
@@ -861,7 +890,6 @@ const PublicHome: React.FC = () => {
                     )}
                   </AnimatePresence>
                 </div>
-              </div>
 
               {error && (
                 <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-xs font-bold text-red-600">
@@ -954,6 +982,15 @@ const PublicHome: React.FC = () => {
                         {result.score > 50 ? 'AI Generated' : 'Human Written'}
                       </motion.div>
                     </div>
+
+                    {result.modelUsed && (
+                      <div className="mt-2 text-center">
+                        <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-zinc-50 border border-zinc-100 rounded-md text-[9px] font-bold text-zinc-400 uppercase tracking-widest">
+                          <Zap className="w-3 h-3" />
+                          Analyzed by {result.modelUsed.replace('-preview', '').replace(/-/g, ' ')}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex gap-6 justify-center">
                       <div className="flex items-center gap-2">
