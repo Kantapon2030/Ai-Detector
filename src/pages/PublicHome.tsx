@@ -93,6 +93,8 @@ const PublicHome: React.FC = () => {
   const [history, setHistory] = useState<any[]>([]);
   const [isDeletingHistory, setIsDeletingHistory] = useState(false);
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [patterns, setPatterns] = useState<any[]>([]);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
@@ -112,12 +114,36 @@ const PublicHome: React.FC = () => {
 
   const isAdmin = user?.email === "tawna20081@gmail.com";
 
+  const fetchPatterns = async () => {
+    if (!isAdmin) return;
+    try {
+      const querySnapshot = await getDocs(collection(db, 'patterns'));
+      setPatterns(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    } catch (err) {
+      console.error("Failed to fetch patterns:", err);
+    }
+  };
+
+  const deletePattern = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'patterns', id));
+      setPatterns(prev => prev.filter(p => p.id !== id));
+    } catch (err) {
+      console.error("Failed to delete pattern:", err);
+    }
+  };
+
   const login = async () => {
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Login failed:", err);
+      if (err.code === 'auth/unauthorized-domain') {
+        setError(`เกิดข้อผิดพลาด: โดเมนนี้ยังไม่ได้รับอนุญาตให้ใช้งาน Firebase Auth\n\nกรุณาเพิ่มโดเมนนี้ใน Firebase Console:\n${window.location.hostname}`);
+      } else {
+        setError('เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      }
     }
   };
 
@@ -476,9 +502,15 @@ const PublicHome: React.FC = () => {
         timestamp: new Date().toISOString()
       });
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("Analysis failed:", err);
-      setError('เกิดข้อผิดพลาดในการวิเคราะห์ กรุณาลองใหม่อีกครั้ง');
+      if (err.message?.includes('leaked')) {
+        setError('⚠️ ตรวจพบว่า API Key หลุดสู่สาธารณะ (Leaked API Key) กรุณาติดต่อผู้ดูแลระบบเพื่อเปลี่ยน Key ใหม่ใน AI Studio Secrets');
+      } else if (err.message?.includes('PERMISSION_DENIED')) {
+        setError('⚠️ สิทธิ์การเข้าถึงถูกปฏิเสธ (Permission Denied) กรุณาตรวจสอบการตั้งค่า API Key');
+      } else {
+        setError('เกิดข้อผิดพลาดในการวิเคราะห์ กรุณาลองใหม่อีกครั้ง');
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -527,6 +559,21 @@ const PublicHome: React.FC = () => {
                 <span className="text-xs font-bold text-zinc-900">{user.displayName}</span>
                 <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">{isAdmin ? 'Admin' : 'User'}</span>
               </div>
+              {isAdmin && (
+                <button 
+                  onClick={() => {
+                    setShowAdminPanel(!showAdminPanel);
+                    if (!showAdminPanel) fetchPatterns();
+                  }}
+                  className={cn(
+                    "p-2 rounded-full transition-all shadow-sm border",
+                    showAdminPanel ? "bg-blue-500 text-white border-blue-600" : "bg-white text-zinc-400 border-zinc-200 hover:bg-zinc-50"
+                  )}
+                  title="จัดการข้อมูล"
+                >
+                  <Shield className="w-4 h-4" />
+                </button>
+              )}
               <button 
                 onClick={logout}
                 className="p-2 bg-white border border-zinc-200 rounded-full hover:bg-zinc-50 transition-all shadow-sm"
@@ -547,6 +594,97 @@ const PublicHome: React.FC = () => {
       </header>
 
       <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-8 md:space-y-16 relative z-10">
+        {/* Admin Panel */}
+        <AnimatePresence>
+          {showAdminPanel && isAdmin && (
+            <motion.section
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="bg-white border-2 border-blue-100 rounded-[2.5rem] p-8 shadow-xl space-y-8 overflow-hidden"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center">
+                    <Shield className="w-6 h-6 text-blue-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-serif font-black text-zinc-900">แผงควบคุมผู้ดูแลระบบ</h3>
+                    <p className="text-xs text-zinc-500">จัดการข้อมูล Submissions และ RAG Patterns</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowAdminPanel(false)}
+                  className="p-2 hover:bg-zinc-100 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-zinc-400" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Submissions Management */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-black text-zinc-900 flex items-center gap-2">
+                    <History className="w-4 h-4 text-blue-500" />
+                    จัดการ Submissions ({history.length})
+                  </h4>
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    {history.map(item => (
+                      <div key={item.id} className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-100 group">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-mono text-zinc-400">{item.id}</span>
+                          <span className="text-xs font-medium text-zinc-700 line-clamp-1">{item.text}</span>
+                        </div>
+                        <button 
+                          onClick={() => deleteHistoryItem(item.id)}
+                          className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button 
+                    onClick={clearAllHistory}
+                    disabled={isDeletingHistory}
+                    className="w-full py-3 bg-red-50 text-red-600 text-xs font-black rounded-xl uppercase tracking-widest hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                  >
+                    {isDeletingHistory ? <RefreshCw className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                    ล้างข้อมูล Submissions ทั้งหมด
+                  </button>
+                </div>
+
+                {/* Patterns Management */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-black text-zinc-900 flex items-center gap-2">
+                    <BrainCircuit className="w-4 h-4 text-blue-500" />
+                    จัดการ RAG Patterns ({patterns.length})
+                  </h4>
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    {patterns.map(p => (
+                      <div key={p.id} className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-100 group">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-mono text-zinc-400">{p.label === 'cheating' ? 'ทุจริต' : 'ปกติ'}</span>
+                          <span className="text-xs font-medium text-zinc-700 line-clamp-1">{p.text}</span>
+                        </div>
+                        <button 
+                          onClick={() => deletePattern(p.id)}
+                          className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-zinc-400 italic">
+                    * ข้อมูล Patterns ใช้สำหรับเปรียบเทียบความหมาย (Semantic Search) เพื่อเพิ่มความแม่นยำ
+                  </p>
+                </div>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+
         <section className="space-y-6 md:space-y-8">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
             <motion.div 
