@@ -1,0 +1,789 @@
+import React, { useState } from 'react';
+import { 
+  Shield, 
+  BrainCircuit, 
+  RefreshCw, 
+  Upload, 
+  FileText, 
+  Image as ImageIcon, 
+  File, 
+  X,
+  AlertTriangle,
+  CheckCircle2,
+  Zap,
+  History,
+  MessageSquare,
+  User,
+  Bot
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  collection, 
+  addDoc, 
+  doc, 
+  updateDoc, 
+  serverTimestamp, 
+  query, 
+  where, 
+  limit, 
+  getDocs 
+} from 'firebase/firestore';
+import { GoogleGenAI, Type } from "@google/genai";
+import mammoth from 'mammoth';
+import { db } from '../firebase';
+import GaugeMeter from '../components/GaugeMeter';
+import Logo from '../components/Logo';
+import Markdown from 'react-markdown';
+import { cn } from '../lib/utils';
+
+interface HeatmapSegment {
+  text: string;
+  score: number;
+}
+
+interface AnalysisResult {
+  score: number;
+  reasoning: string;
+  heatmap: HeatmapSegment[];
+  confidenceScore: number;
+  analysisDetails: {
+    grammar: string;
+    depth: string;
+    wordUsage: string;
+  };
+}
+
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+
+// Cosine similarity for RAG
+function cosineSimilarity(vecA: number[], vecB: number[]) {
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+const PublicHome: React.FC = () => {
+  const [inputText, setInputText] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [disputeStatus, setDisputeStatus] = useState<'none' | 'submitting' | 'submitted'>('none');
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputeType, setDisputeType] = useState<'claim_human' | 'claim_ai'>('claim_human');
+  const [isCached, setIsCached] = useState(false);
+
+  // Client-side cache
+  const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      const allowedTypes = [
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/pdf',
+        'image/png'
+      ];
+      if (allowedTypes.includes(selectedFile.type)) {
+        setFile(selectedFile);
+        setError(null);
+      } else {
+        setError('รองรับเฉพาะไฟล์ .docx, .pdf, และ .png เท่านั้น');
+      }
+    }
+  };
+
+  const removeFile = () => {
+    setFile(null);
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const performAnalysis = async () => {
+    if (!inputText && !file) return;
+    
+    // 0. Client-side Cache Check
+    const cacheKey = inputText.trim();
+    if (cacheKey && !file && analysisCache.current.has(cacheKey)) {
+      const cached = analysisCache.current.get(cacheKey)!;
+      setResult(cached);
+      setStreamingReasoning(cached.reasoning);
+      setIsCached(true);
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setResult(null);
+    setStreamingReasoning('');
+    setError(null);
+    setIsCached(false);
+    setDisputeStatus('none');
+
+    try {
+      let promptText = inputText;
+      let parts: any[] = [];
+
+      // 1. Server-side Caching Check (Exact match)
+      if (inputText && !file) {
+        const q = query(
+          collection(db, 'submissions'), 
+          where('text', '==', inputText),
+          where('status', '==', 'analyzed'),
+          limit(1)
+        );
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          const subDoc = querySnapshot.docs[0];
+          const subId = subDoc.id;
+          
+          const resQ = query(collection(db, 'analysisResults'), where('submissionId', '==', subId), limit(1));
+          const resSnapshot = await getDocs(resQ);
+          
+          if (!resSnapshot.empty) {
+            const resData = resSnapshot.docs[0].data();
+            const cachedResult: AnalysisResult = {
+              score: resData.cheatingScore,
+              reasoning: resData.reasoning,
+              heatmap: resData.heatmap || [],
+              confidenceScore: resData.confidenceScore || 100,
+              analysisDetails: resData.analysisDetails || {
+                grammar: "N/A",
+                depth: "N/A",
+                wordUsage: "N/A"
+              }
+            };
+            
+            // Update client cache
+            analysisCache.current.set(cacheKey, cachedResult);
+
+            // Simulate streaming for cached results to maintain UX consistency
+            const words = cachedResult.reasoning.split(' ');
+            let currentText = '';
+            for (let i = 0; i < words.length; i++) {
+              currentText += words[i] + ' ';
+              setStreamingReasoning(currentText);
+              await new Promise(r => setTimeout(r, 15));
+            }
+            
+            setResult(cachedResult);
+            setSubmissionId(subId);
+            setIsCached(true);
+            setIsAnalyzing(false);
+            return;
+          }
+        }
+      }
+
+      if (file) {
+        if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          const arrayBuffer = await file.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          promptText += `\n\n[เนื้อหาจากไฟล์ DOCX]:\n${result.value}`;
+        } else if (file.type === 'application/pdf' || file.type === 'image/png') {
+          const base64 = await fileToBase64(file);
+          parts.push({
+            inlineData: {
+              data: base64,
+              mimeType: file.type
+            }
+          });
+        }
+      }
+
+      // 2. RAG & Text Truncation
+      let ragContext = "";
+      if (promptText) {
+        // Truncate for embedding if too long (keep intro and conclusion)
+        const truncatedText = promptText.length > 2000 
+          ? promptText.slice(0, 1000) + "\n...\n" + promptText.slice(-1000)
+          : promptText;
+
+        const [embedding] = await Promise.all([
+          genAI.models.embedContent({
+            model: 'gemini-embedding-2-preview',
+            contents: [truncatedText],
+          }).then(res => res.embeddings[0].values)
+        ]);
+
+        // Fetch patterns for RAG
+        const patternsSnap = await getDocs(collection(db, 'patterns'));
+        const similarPatterns = patternsSnap.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as any))
+          .map(p => ({ ...p, similarity: cosineSimilarity(embedding, p.embedding) }))
+          .filter(p => p.similarity > 0.6) // Semantic Threshold
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, 3);
+
+        if (similarPatterns.length > 0) {
+          ragContext = "\n\n**ข้อมูลอ้างอิงจากฐานข้อมูล (RAG Context)**:\n" + 
+            similarPatterns.map(p => `- รูปแบบ: ${p.label === 'cheating' ? 'ทุจริต' : 'ปกติ'}\n  เนื้อหา: ${p.text.slice(0, 200)}...`).join('\n');
+        }
+      }
+
+      parts.push({
+        text: `
+          คุณคือคณะกรรมการผู้เชี่ยวชาญด้านความโปร่งใสทางวิชาการ (Multi-Persona Analysis)
+          วิเคราะห์ข้อความหรือไฟล์ต่อไปนี้เพื่อหาโอกาสในการทุจริตหรือการใช้ AI สร้างข้อความ
+          
+          เนื้อหาที่ส่งมา:
+          ${promptText}
+          ${ragContext}
+          
+          **เกณฑ์การวิเคราะห์ (วิเคราะห์แยกเป็น 3 ส่วน)**:
+          1. โครงสร้างไวยากรณ์ (Grammar Structure): วิเคราะห์ความสมบูรณ์ ความเป็นธรรมชาติ หรือความซ้ำซ้อนที่เป็นเอกลักษณ์ของ AI
+          2. ความลึกซึ้งของเนื้อหา (Depth of Content): วิเคราะห์ความหมายเชิงลึก การโต้แย้ง และความสอดคล้องของเนื้อหา
+          3. รูปแบบการใช้คำเชื่อม (Word Usage): วิเคราะห์ความถี่ของคำเชื่อมและรูปแบบการเรียงประโยค
+          
+          **คำแนะนำสำคัญ**:
+          1. ให้ประเมินความน่าจะเป็นว่าเป็น AI หรือ มนุษย์ (0-100 โดยที่ 100 คือมั่นใจว่าเป็น AI แน่นอน)
+          2. ให้คะแนนความมั่นใจ (Confidence Score 0-100) ในการวิเคราะห์ครั้งนี้
+          3. ให้คำอธิบายสั้นๆ เป็นข้อๆ (Bullet points) ในภาษาไทยที่เข้าใจง่าย
+          4. **สำคัญมาก**: แบ่งเนื้อหาที่ส่งมาออกเป็นส่วนๆ (Segments) และให้คะแนนความมั่นใจว่าเป็น AI (0-100) ในแต่ละส่วน เพื่อทำ Heatmap
+          
+          ส่งผลการวิเคราะห์ในรูปแบบ JSON ดังนี้:
+          {
+            "score": number,
+            "confidenceScore": number,
+            "reasoning": "ข้อความสรุปเหตุผลรวม (ใช้รูปแบบ Markdown) เป็นภาษาไทยที่เข้าใจง่าย",
+            "analysisDetails": {
+              "grammar": "สรุปผลด้านไวยากรณ์",
+              "depth": "สรุปผลด้านความลึกซึ้ง",
+              "wordUsage": "สรุปผลด้านการใช้คำ"
+            },
+            "heatmap": [
+              { "text": "ส่วนของข้อความ", "score": number },
+              ...
+            ]
+          }
+        `
+      });
+
+      const responseStream = await genAI.models.generateContentStream({
+        model: "gemini-3-flash-preview",
+        contents: { parts },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              score: { type: Type.NUMBER },
+              confidenceScore: { type: Type.NUMBER },
+              reasoning: { type: Type.STRING },
+              analysisDetails: {
+                type: Type.OBJECT,
+                properties: {
+                  grammar: { type: Type.STRING },
+                  depth: { type: Type.STRING },
+                  wordUsage: { type: Type.STRING }
+                },
+                required: ["grammar", "depth", "wordUsage"]
+              },
+              heatmap: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    text: { type: Type.STRING },
+                    score: { type: Type.NUMBER }
+                  },
+                  required: ["text", "score"]
+                }
+              }
+            },
+            required: ["score", "confidenceScore", "reasoning", "analysisDetails", "heatmap"]
+          }
+        }
+      });
+
+      let fullText = "";
+      for await (const chunk of responseStream) {
+        const chunkText = chunk.text;
+        fullText += chunkText;
+        
+        // Simple regex fallback to show reasoning while streaming
+        // This is more robust than JSON.parse on partial text
+        const reasoningMatch = fullText.match(/"reasoning":\s*"((?:[^"\\]|\\.)*)"/);
+        if (reasoningMatch && reasoningMatch[1]) {
+          // Unescape newlines and other characters
+          const unescaped = reasoningMatch[1]
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t')
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\');
+          setStreamingReasoning(unescaped);
+        }
+      }
+
+      const analysisResult: AnalysisResult = JSON.parse(fullText);
+      setResult(analysisResult);
+      setStreamingReasoning(analysisResult.reasoning);
+      
+      // Update client cache
+      if (cacheKey) {
+        analysisCache.current.set(cacheKey, analysisResult);
+      }
+
+      // Parallel Firebase Storage (Faster Performance)
+      const subRefPromise = addDoc(collection(db, 'submissions'), {
+        text: promptText || `[File: ${file?.name}]`,
+        status: 'analyzed',
+        timestamp: new Date().toISOString(),
+        isAnonymous: true,
+        disputed: false
+      });
+
+      const subRef = await subRefPromise;
+      setSubmissionId(subRef.id);
+
+      await addDoc(collection(db, 'analysisResults'), {
+        submissionId: subRef.id,
+        cheatingScore: analysisResult.score,
+        confidenceScore: analysisResult.confidenceScore,
+        reasoning: analysisResult.reasoning,
+        analysisDetails: analysisResult.analysisDetails,
+        heatmap: analysisResult.heatmap,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (err) {
+      console.error("Analysis failed:", err);
+      setError('เกิดข้อผิดพลาดในการวิเคราะห์ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleDispute = async () => {
+    if (!submissionId) return;
+    setDisputeStatus('submitting');
+    try {
+      const subRef = doc(db, 'submissions', submissionId);
+      await updateDoc(subRef, {
+        disputed: true,
+        disputeTimestamp: serverTimestamp(),
+        disputeType: disputeType,
+        disputeReason: disputeReason
+      });
+      setDisputeStatus('submitted');
+    } catch (err) {
+      console.error("Dispute failed:", err);
+      setError('ไม่สามารถส่งคำโต้แย้งได้ในขณะนี้');
+      setDisputeStatus('none');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f8fafc] text-zinc-900 font-sans selection:bg-blue-500/30 relative overflow-hidden">
+      {/* Grand Background Elements */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
+        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-blue-100/40 rounded-full blur-[120px]" />
+        <div className="absolute top-[20%] -right-[10%] w-[30%] h-[30%] bg-indigo-100/30 rounded-full blur-[100px]" />
+        <div className="absolute -bottom-[10%] left-[20%] w-[50%] h-[50%] bg-sky-100/20 rounded-full blur-[150px]" />
+      </div>
+
+      <header className="h-24 border-b border-zinc-200/50 flex items-center justify-between px-8 sticky top-0 bg-white/60 backdrop-blur-xl z-40">
+        <Logo />
+        <div className="flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm backdrop-blur-sm">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+          <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">ระบบพร้อมใช้งาน</span>
+        </div>
+      </header>
+
+      <main className="p-8 max-w-5xl mx-auto space-y-16 relative z-10">
+        <section className="space-y-8">
+          <div className="text-center space-y-4 max-w-2xl mx-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-4"
+            >
+              <Zap className="w-3 h-3" />
+              Powered by Gemini 3 Flash
+            </motion.div>
+            <motion.h2 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-4xl font-serif font-black tracking-tight text-zinc-900"
+            >
+              ตรวจสอบความโปร่งใสของข้อมูล
+            </motion.h2>
+            <motion.p 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="text-zinc-500 text-lg leading-relaxed"
+            >
+              วางข้อความหรืออัปโหลดไฟล์เพื่อวิเคราะห์ความเป็นมนุษย์ vs AI ด้วยเทคโนโลยีตรวจจับที่แม่นยำที่สุด
+            </motion.p>
+          </div>
+
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white/80 border border-white/20 rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] backdrop-blur-2xl overflow-hidden"
+          >
+            <div className="p-8 space-y-8">
+              <div className="space-y-4">
+                <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest">ข้อความที่ต้องการตรวจสอบ</label>
+                <textarea 
+                  placeholder="วางข้อความที่นี่..."
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  className="w-full h-64 bg-zinc-50 border border-zinc-200 rounded-2xl p-6 font-sans text-base focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest">อัปโหลดไฟล์ (DOCX, PDF, PNG)</label>
+                  <div className="relative">
+                    <input 
+                      type="file" 
+                      id="file-upload"
+                      className="hidden"
+                      onChange={handleFileChange}
+                      accept=".docx,.pdf,.png"
+                    />
+                    <label 
+                      htmlFor="file-upload"
+                      className="flex items-center justify-center gap-3 w-full py-4 border-2 border-dashed border-zinc-200 rounded-2xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
+                    >
+                      <Upload className="w-5 h-5 text-zinc-400 group-hover:text-blue-500" />
+                      <span className="text-sm font-medium text-zinc-500 group-hover:text-blue-600">
+                        {file ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์เพื่ออัปโหลด'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex items-end">
+                  <AnimatePresence>
+                    {file && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        className="flex items-center justify-between w-full p-4 bg-blue-50 border border-blue-100 rounded-2xl"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-white rounded-lg shadow-sm">
+                            {file.type.includes('image') ? <ImageIcon className="w-5 h-5 text-blue-500" /> : 
+                             file.type.includes('pdf') ? <File className="w-5 h-5 text-red-500" /> : 
+                             <FileText className="w-5 h-5 text-blue-600" />}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-zinc-800 line-clamp-1">{file.name}</span>
+                            <span className="text-[10px] font-mono text-zinc-400">{(file.size / 1024).toFixed(1)} KB</span>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={removeFile}
+                          className="p-1 hover:bg-blue-100 rounded-full text-blue-400 hover:text-blue-600 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-xs font-bold text-red-600">
+                  {error}
+                </div>
+              )}
+
+              <button 
+                onClick={performAnalysis}
+                disabled={isAnalyzing || (!inputText && !file)}
+                className="w-full py-5 bg-zinc-900 text-white font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl relative overflow-hidden group"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <RefreshCw className="w-6 h-6 animate-spin" />
+                    กำลังวิเคราะห์ข้อมูล...
+                    <motion.div 
+                      className="absolute bottom-0 left-0 h-1 bg-blue-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: '100%' }}
+                      transition={{ duration: 5, ease: "linear" }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <BrainCircuit className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                    ทดสอบข้อมูล
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </section>
+
+        <AnimatePresence>
+          {isAnalyzing && !result && (
+            <motion.section 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="space-y-8"
+            >
+              <div className="bg-white/50 border border-zinc-200/50 rounded-[2.5rem] p-8 animate-pulse">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                  <div className="aspect-square bg-zinc-100 rounded-full max-w-[300px] mx-auto" />
+                  <div className="space-y-6">
+                    <div className="h-8 bg-zinc-100 rounded-lg w-1/2" />
+                    <div className="space-y-3">
+                      <div className="h-4 bg-zinc-100 rounded w-full" />
+                      <div className="h-4 bg-zinc-100 rounded w-5/6" />
+                      <div className="h-4 bg-zinc-100 rounded w-4/6" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.section>
+          )}
+
+          {result && (
+            <motion.section 
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              {isCached && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-100 rounded-full text-[10px] font-bold text-amber-600 uppercase tracking-widest w-fit mx-auto">
+                  <History className="w-3 h-3" />
+                  แสดงผลจากหน่วยความจำ (Cached)
+                </div>
+              )}
+
+              <div className="bg-white border border-zinc-200 rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] p-10 space-y-12">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+                  <div className="relative">
+                    <GaugeMeter score={result.score} label="ความน่าจะเป็นของ AI" />
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-zinc-900 text-white text-[10px] font-bold rounded-full uppercase tracking-widest"
+                    >
+                      {result.score > 50 ? 'AI Generated' : 'Human Written'}
+                    </motion.div>
+                  </div>
+                  
+                  <div className="space-y-8">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
+                            <BrainCircuit className="w-4 h-4 text-blue-600" />
+                          </div>
+                          <h3 className="text-2xl font-serif font-black text-zinc-900">ผลการวิเคราะห์</h3>
+                        </div>
+                        {result.confidenceScore < 60 && (
+                          <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 border border-amber-100 rounded-full text-[10px] font-bold text-amber-600 uppercase tracking-widest">
+                            <AlertTriangle className="w-3 h-3" />
+                            ความมั่นใจต่ำ
+                          </div>
+                        )}
+                      </div>
+                      <div className="h-1 w-16 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" />
+                    </div>
+                    
+                    <div className="prose prose-zinc prose-sm max-w-none text-zinc-600 leading-relaxed min-h-[100px]">
+                      {result.confidenceScore < 40 ? (
+                        <div className="p-4 bg-amber-50/50 border border-amber-100 rounded-2xl text-amber-700 italic">
+                          "ข้อมูลไม่เพียงพอที่จะระบุได้ชัดเจน ระบบมีความมั่นใจในการวิเคราะห์ต่ำเกินไป โปรดตรวจสอบด้วยตนเองเพิ่มเติม"
+                        </div>
+                      ) : (
+                        <>
+                          <Markdown>{streamingReasoning}</Markdown>
+                          {isAnalyzing && <span className="inline-block w-1.5 h-4 bg-blue-500 ml-1 animate-pulse" />}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Multi-Persona Details */}
+                    {result.analysisDetails && (
+                      <div className="grid grid-cols-1 gap-3">
+                        <AnalysisDetailItem label="โครงสร้างไวยากรณ์" value={result.analysisDetails.grammar} />
+                        <AnalysisDetailItem label="ความลึกซึ้งของเนื้อหา" value={result.analysisDetails.depth} />
+                        <AnalysisDetailItem label="รูปแบบการใช้คำเชื่อม" value={result.analysisDetails.wordUsage} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Heatmap Section */}
+                {result.heatmap && result.heatmap.length > 0 && (
+                  <div className="space-y-6 pt-8 border-t border-zinc-100">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-[0.2em]">Heatmap Scoring</h4>
+                      <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest">
+                        <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-green-500 rounded-full" /> มนุษย์</div>
+                        <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-red-500 rounded-full" /> AI</div>
+                      </div>
+                    </div>
+                    <div className="p-8 bg-zinc-50 border border-zinc-100 rounded-[2rem] leading-relaxed text-zinc-800 font-serif text-lg">
+                      {result.heatmap.map((seg, i) => {
+                        // Interpolate color based on score
+                        // 0 (Human) -> Green, 100 (AI) -> Red
+                        const isAI = seg.score > 50;
+                        const opacity = Math.abs(seg.score - 50) / 50 * 0.2 + 0.05;
+                        const bgColor = isAI ? `rgba(239, 68, 68, ${opacity})` : `rgba(34, 197, 94, ${opacity})`;
+                        const borderColor = isAI ? `rgba(239, 68, 68, ${opacity + 0.1})` : `rgba(34, 197, 94, ${opacity + 0.1})`;
+                        
+                        return (
+                          <span 
+                            key={i} 
+                            style={{ backgroundColor: bgColor, borderBottom: `2px solid ${borderColor}` }}
+                            className="px-0.5 rounded-sm transition-colors hover:brightness-95 cursor-help"
+                            title={`AI Confidence: ${seg.score}%`}
+                          >
+                            {seg.text}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-6">
+                  <div className="p-6 bg-zinc-50/50 border border-zinc-100 rounded-[2rem] flex items-start gap-4">
+                    <AlertTriangle className="w-5 h-5 text-zinc-300 shrink-0 mt-0.5" />
+                    <p className="text-xs font-medium text-zinc-400 leading-relaxed">
+                      ผลการวิเคราะห์นี้เป็นเพียงการประเมินเบื้องต้นโดยปัญญาประดิษฐ์ (AI) 
+                      ซึ่งอาจมีความคลาดเคลื่อนในบางกรณี โปรดใช้วิจารณญาณและตรวจสอบข้อมูลเพิ่มเติมเพื่อความถูกต้องสูงสุด
+                    </p>
+                  </div>
+
+                  <div className="pt-8 border-t border-zinc-100">
+                    <AnimatePresence mode="wait">
+                      {disputeStatus === 'submitted' ? (
+                        <motion.div 
+                          key="submitted"
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="flex items-center gap-4 p-6 bg-green-50 border border-green-100 rounded-[2rem] text-green-700 shadow-sm"
+                        >
+                          <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
+                            <CheckCircle2 className="w-6 h-6" />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-black">ส่งคำโต้แย้งเรียบร้อยแล้ว</span>
+                            <span className="text-xs opacity-80 font-medium">แอดมินจะตรวจสอบข้อมูลและนำไปพัฒนาระบบให้แม่นยำยิ่งขึ้น</span>
+                          </div>
+                        </motion.div>
+                      ) : (
+                        <motion.div 
+                          key="form"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="space-y-6"
+                        >
+                          <div className="flex items-center gap-3">
+                            <MessageSquare className="w-5 h-5 text-blue-500" />
+                            <h4 className="text-sm font-black text-zinc-900">ผลลัพธ์ไม่ถูกต้อง? ช่วยเราปรับปรุงระบบ</h4>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button 
+                              onClick={() => setDisputeType('claim_human')}
+                              className={cn(
+                                "flex items-center gap-3 p-4 border rounded-2xl transition-all font-bold text-sm",
+                                disputeType === 'claim_human' ? "bg-blue-50 border-blue-200 text-blue-600 ring-2 ring-blue-100" : "bg-white border-zinc-200 text-zinc-500 hover:border-blue-200"
+                              )}
+                            >
+                              <User className="w-5 h-5" />
+                              ข้อความนี้เขียนโดยมนุษย์
+                            </button>
+                            <button 
+                              onClick={() => setDisputeType('claim_ai')}
+                              className={cn(
+                                "flex items-center gap-3 p-4 border rounded-2xl transition-all font-bold text-sm",
+                                disputeType === 'claim_ai' ? "bg-red-50 border-red-200 text-red-600 ring-2 ring-red-100" : "bg-white border-zinc-200 text-zinc-500 hover:border-red-200"
+                              )}
+                            >
+                              <Bot className="w-5 h-5" />
+                              ข้อความนี้เขียนโดย AI
+                            </button>
+                          </div>
+
+                          <textarea 
+                            placeholder="ระบุเหตุผลเพิ่มเติม (ถ้ามี)..."
+                            value={disputeReason}
+                            onChange={(e) => setDisputeReason(e.target.value)}
+                            className="w-full p-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                            rows={3}
+                          />
+
+                          <button 
+                            onClick={handleDispute}
+                            disabled={disputeStatus === 'submitting'}
+                            className="w-full py-4 bg-white border border-zinc-900 text-zinc-900 rounded-2xl text-sm font-black hover:bg-zinc-900 hover:text-white transition-all shadow-sm flex items-center justify-center gap-2"
+                          >
+                            {disputeStatus === 'submitting' ? (
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <AlertTriangle className="w-4 h-4" />
+                            )}
+                            ส่งคำโต้แย้งไปยังแอดมิน
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+      </main>
+
+      <footer className="p-12 text-center border-t border-zinc-100">
+        <p className="text-xs font-mono text-zinc-400 uppercase tracking-widest">
+          &copy; 2026 EduGuard AI - พลิกเกมกลโกง
+        </p>
+      </footer>
+    </div>
+  );
+};
+
+function AnalysisDetailItem({ label, value }: { label: string, value: string }) {
+  return (
+    <div className="p-3 bg-zinc-50 border border-zinc-100 rounded-xl space-y-1">
+      <div className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">{label}</div>
+      <div className="text-xs text-zinc-600 font-medium">{value}</div>
+    </div>
+  );
+}
+
+function AnalysisDetailItemSkeleton() {
+  return (
+    <div className="p-3 bg-zinc-50 border border-zinc-100 rounded-xl space-y-2 animate-pulse">
+      <div className="h-2 bg-zinc-200 rounded w-1/4" />
+      <div className="h-3 bg-zinc-200 rounded w-3/4" />
+    </div>
+  );
+}
+
+export default PublicHome;

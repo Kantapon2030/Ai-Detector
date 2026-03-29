@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "tawna20081@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // Domain Validators
+    function isValidSubmission(data) {
+      return data.text is string && data.text.size() > 0 && data.text.size() < 50000 &&
+             data.status in ['pending', 'analyzed', 'corrected'] &&
+             data.timestamp is string;
+    }
+
+    function isValidAnalysisResult(data) {
+      return data.submissionId is string &&
+             data.cheatingScore is number && data.cheatingScore >= 0 && data.cheatingScore <= 100 &&
+             data.reasoning is string && data.reasoning.size() < 10000 &&
+             data.timestamp is string;
+    }
+
+    function isValidPattern(data) {
+      return data.text is string && data.text.size() > 0 && data.text.size() < 10000 &&
+             data.label in ['cheating', 'not_cheating'] &&
+             data.timestamp is string;
+    }
+
+    // Collection Rules
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if isAuthenticated();
+      allow create: if true; // Anonymous submission
+      allow update: if isAdmin() && isValidSubmission(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /analysisResults/{resultId} {
+      allow read: if true; // Allow anonymous to read their results
+      allow create: if true; // Anonymous analysis result storage
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /patterns/{patternId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidPattern(request.resource.data);
+      allow update: if isAdmin() && isValidPattern(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}
