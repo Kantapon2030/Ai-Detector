@@ -41,8 +41,12 @@ import { auth, db } from "./firebase";
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-// ใช้ SDK มาตรฐานตัวเดียว
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+// ใช้ SDK มาตรฐานตัวเดียวตามคู่มือ
+import { GoogleGenAI, Type } from "@google/genai";
+
+// ตั้งค่า Gemini API
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+const ai = new GoogleGenAI({ apiKey });
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -75,33 +79,19 @@ interface CheatingPattern {
   timestamp: string;
 }
 
-// ตั้งค่า Gemini (ดักจับกรณีลืมใส่คีย์)
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
-const genAI = new GoogleGenerativeAI(apiKey);
-
+// --- Helper Functions ---
 async function getEmbedding(text: string) {
   try {
-    if (!apiKey) throw new Error("API Key is missing!");
-    
-    // ลองใช้ text-embedding-004 ซึ่งเป็นตัวล่าสุดของปี 2026
-    const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
-    const result = await model.embedContent(text);
-    return result.embedding.values;
+    const response = await ai.models.embedContent({
+      model: "text-embedding-004",
+      contents: [text],
+    });
+    return response.embeddings[0].values;
   } catch (error) {
-    console.warn("⚠️ Embedding failed, using fallback vector:", error);
-    // ถ้า Embedding พัง ให้ส่งอาเรย์ 0 กลับไป 768 ตัว (ขนาดมาตรฐาน)
-    // เพื่อให้ระบบ RAG ยังทำงานต่อได้โดยไม่ Error หน้าขาว
+    console.warn("⚠️ Embedding failed, using fallback:", error);
     return new Array(768).fill(0);
   }
 }
-
-// --- และใน performAnalysis ตรงส่วนเรียก Gemini ---
-// เปลี่ยนจาก gemini-3-flash-preview (ถ้ายังไม่เปิดให้ใช้ทั่วไป) 
-// เป็นตัวที่เสถียรที่สุดคือ gemini-1.5-flash ครับ
-const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash", 
-  // ... (โค้ดที่เหลือเหมือนเดิม)
-});
 
 function cosineSimilarity(vecA: number[], vecB: number[]) {
   let dotProduct = 0;
@@ -112,11 +102,11 @@ function cosineSimilarity(vecA: number[], vecB: number[]) {
     normA += vecA[i] * vecA[i];
     normB += vecB[i] * vecB[i];
   }
+  if (normA === 0 || normB === 0) return 0;
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-// --- Components ---
-
+// --- Main Component ---
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -177,15 +167,10 @@ export default function App() {
   const performAnalysis = async (text: string, subId: string) => {
     setIsAnalyzing(true);
     try {
-      if (!apiKey) {
-        alert("ไม่พบ VITE_GEMINI_API_KEY กรุณาตรวจสอบไฟล์ .env");
-        return;
-      }
-
-      // 1. Get Embedding
+      // 1. ดึงข้อมูล Embedding
       const embedding = await getEmbedding(text);
 
-      // 2. RAG: Find similar cases
+      // 2. RAG: คำนวณความคล้ายคลึงเพื่อดึงเคสในอดีตมาเป็น Context
       const similarities = patterns.map(p => ({
         id: p.id,
         text: p.text,
@@ -197,63 +182,60 @@ export default function App() {
         `กรณี: ${s.text}\nประเภท: ${s.label === 'cheating' ? 'ทุจริต' : 'ปกติ'}\nความคล้ายคลึง: ${s.similarity.toFixed(4)}`
       ).join('\n\n');
 
-      // 3. Reasoning with Gemini
-      const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
-        generationConfig: {
+      // 3. วิเคราะห์ด้วย Gemini
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview", // ใช้โมเดลตามคู่มือ
+        contents: `
+          คุณคือผู้เชี่ยวชาญด้านความโปร่งใสทางวิชาการ
+          วิเคราะห์ข้อความต่อไปนี้เพื่อหาโอกาสในการทุจริตหรือการใช้ AI สร้างข้อความ
+          
+          ข้อความที่ส่งมา:
+          ${text}
+          
+          ข้อมูลอ้างอิงจากอดีต (RAG CONTEXT):
+          ${context || 'ยังไม่มีข้อมูลในอดีต'}
+          
+          ประเมินตามเกณฑ์ดังนี้:
+          1. ความคล้ายคลึงกับรูปแบบการทุจริตที่เคยพบ
+          2. ความสม่ำเสมอของโทนและสไตล์การเขียน
+          3. ความซับซ้อนเมื่อเทียบกับระดับนักเรียนทั่วไป
+          
+          **สำคัญ**: ให้ตอบเป็นภาษาไทยที่เข้าใจง่าย ตรงไปตรงมา ไม่ใช้ศัพท์เทคนิคที่ยากเกินไป
+          ส่งผลการวิเคราะห์ในรูปแบบ JSON ตาม Schema ที่กำหนด
+        `,
+        config: {
           responseMimeType: "application/json",
           responseSchema: {
-            type: SchemaType.OBJECT,
+            type: Type.OBJECT,
             properties: {
-              cheatingScore: { type: SchemaType.NUMBER },
-              reasoning: { type: SchemaType.STRING },
-              similarCaseIds: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
+              cheatingScore: { type: Type.NUMBER },
+              reasoning: { type: Type.STRING },
+              similarCaseIds: { type: Type.ARRAY, items: { type: Type.STRING } }
             },
             required: ["cheatingScore", "reasoning", "similarCaseIds"]
           }
         }
       });
 
-      const prompt = `
-        คุณคือผู้เชี่ยวชาญด้านความโปร่งใสทางวิชาการ
-        วิเคราะห์ข้อความต่อไปนี้เพื่อหาโอกาสในการทุจริตหรือการใช้ AI สร้างข้อความ
-        
-        ข้อความที่ส่งมา:
-        ${text}
-        
-        ข้อมูลอ้างอิงจากอดีต (RAG CONTEXT):
-        ${context}
-        
-        ประเมินตามเกณฑ์ดังนี้:
-        1. ความคล้ายคลึงกับรูปแบบการทุจริตที่เคยพบ
-        2. ความสม่ำเสมอของโทนและสไตล์การเขียน
-        3. ความซับซ้อนเมื่อเทียบกับระดับนักเรียนทั่วไป
-        
-        **สำคัญ**: ให้ตอบเป็นภาษาไทยที่เข้าใจง่าย ตรงไปตรงมา ไม่ใช้ศัพท์เทคนิคที่ยากเกินไป
-        ส่งผลการวิเคราะห์ในรูปแบบ JSON ตาม Schema ที่กำหนด
-      `;
+      // 4. แปลงผลลัพธ์เป็น Object
+      const result = JSON.parse(response.text || "{}"); 
 
-      const response = await model.generateContent(prompt);
-      const resultText = response.response.text();
-      const result = JSON.parse(resultText);
-
-      // 4. Store Result
+      // 5. บันทึกลง Firestore
       await addDoc(collection(db, 'analysisResults'), {
         submissionId: subId,
-        cheatingScore: result.cheatingScore,
-        reasoning: result.reasoning,
-        similarCases: result.similarCaseIds,
+        cheatingScore: result.cheatingScore || 0,
+        reasoning: result.reasoning || "ไม่สามารถวิเคราะห์เหตุผลได้",
+        similarCases: result.similarCaseIds || [],
         timestamp: new Date().toISOString()
       });
 
-      // 5. Update Submission Status
       await updateDoc(doc(db, 'submissions', subId), {
         status: 'analyzed'
       });
 
     } catch (error) {
       console.error("Analysis failed:", error);
-      alert("เกิดข้อผิดพลาดในการวิเคราะห์ กรุณาดูใน Console (F12)");
+      alert("เกิดข้อผิดพลาดในการวิเคราะห์ข้อมูลโดย AI");
     } finally {
       setIsAnalyzing(false);
     }
@@ -428,7 +410,7 @@ export default function App() {
                     <div className="space-y-3">
                       <StatusItem icon={<Search className="w-4 h-4" />} label="การเตรียมข้อมูล" status="พร้อม" />
                       <StatusItem icon={<Database className="w-4 h-4" />} label="RAG Controller" status="ทำงาน" />
-                      <StatusItem icon={<BrainCircuit className="w-4 h-4" />} label="Reasoning Engine" status="Gemini 1.5" />
+                      <StatusItem icon={<BrainCircuit className="w-4 h-4" />} label="Reasoning Engine" status="Gemini 3 Preview" />
                     </div>
                   </div>
 
@@ -645,7 +627,7 @@ function SubmissionCard({ submission, result }: { submission: Submission, result
                       </div>
                     </div>
                     
-                    {result.similarCases.length > 0 && (
+                    {result.similarCases && result.similarCases.length > 0 && (
                       <div className="space-y-4">
                         <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">พบรูปแบบที่คล้ายคลึงกัน</h5>
                         <div className="flex flex-wrap gap-2">
