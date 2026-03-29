@@ -40,26 +40,13 @@ const GaugeMeter: React.FC<GaugeMeterProps> = ({ score, label }) => {
             ))}
             <Label
               value={`${score}%`}
-              position="centerBottom"
-              className="text-3xl font-bold fill-zinc-900"
-              style={{ transform: 'translateY(-20px)' }}
+              position="center"
+              className="text-4xl font-black fill-zinc-900"
+              style={{ transform: 'translateY(35px)' }}
             />
           </Pie>
         </PieChart>
       </ResponsiveContainer>
-      <div className="text-center -mt-8">
-        <p className="text-sm font-mono text-zinc-500 uppercase tracking-widest">{label}</p>
-        <div className="flex gap-4 mt-2 justify-center">
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded-full bg-red-500" />
-            <span className="text-[10px] font-mono text-zinc-400">AI / ทุจริต</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded-full bg-green-500" />
-            <span className="text-[10px] font-mono text-zinc-400">มนุษย์ / ปกติ</span>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

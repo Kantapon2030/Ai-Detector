@@ -22,19 +22,29 @@ import {
   addDoc, 
   doc, 
   updateDoc, 
+  deleteDoc,
   serverTimestamp, 
   query, 
   where, 
   limit, 
-  getDocs 
+  getDocs,
+  orderBy
 } from 'firebase/firestore';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
 import { GoogleGenAI, Type } from "@google/genai";
 import mammoth from 'mammoth';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import GaugeMeter from '../components/GaugeMeter';
 import Logo from '../components/Logo';
 import Markdown from 'react-markdown';
 import { cn } from '../lib/utils';
+import FloatingParticles from '../components/FloatingParticles';
 
 interface HeatmapSegment {
   text: string;
@@ -80,9 +90,111 @@ const PublicHome: React.FC = () => {
   const [disputeReason, setDisputeReason] = useState('');
   const [disputeType, setDisputeType] = useState<'claim_human' | 'claim_ai'>('claim_human');
   const [isCached, setIsCached] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const [isDeletingHistory, setIsDeletingHistory] = useState(false);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
+
+  // Auth listener
+  React.useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch history on mount
+  React.useEffect(() => {
+    fetchHistory();
+  }, [user]);
+
+  const isAdmin = user?.email === "tawna20081@gmail.com";
+
+  const login = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      console.error("Login failed:", err);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const q = query(
+        collection(db, 'submissions'),
+        where('status', '==', 'analyzed'),
+        orderBy('timestamp', 'desc'),
+        limit(10)
+      );
+      const querySnapshot = await getDocs(q);
+      const historyItems = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setHistory(historyItems);
+    } catch (err) {
+      console.error("Failed to fetch history:", err);
+    }
+  };
+
+  const deleteHistoryItem = async (id: string) => {
+    try {
+      if (isAdmin) {
+        await deleteDoc(doc(db, 'submissions', id));
+      }
+      setHistory(prev => prev.filter(item => item.id !== id));
+    } catch (err) {
+      console.error("Failed to delete history item:", err);
+      if (err instanceof Error && err.message.includes('permission-denied')) {
+        setError('คุณไม่มีสิทธิ์ลบข้อมูลนี้ (เฉพาะแอดมินเท่านั้น)');
+      }
+    }
+  };
+
+  const clearAllHistory = async () => {
+    if (!isAdmin) {
+      setError('เฉพาะแอดมินเท่านั้นที่สามารถล้างประวัติทั้งหมดได้');
+      return;
+    }
+
+    setIsDeletingHistory(true);
+    try {
+      const q = query(collection(db, 'submissions'), where('status', '==', 'analyzed'));
+      const querySnapshot = await getDocs(q);
+      
+      const deletePromises = querySnapshot.docs.map(d => deleteDoc(doc(db, 'submissions', d.id)));
+      await Promise.all(deletePromises);
+      
+      setHistory([]);
+      analysisCache.current.clear();
+    } catch (err) {
+      console.error("Failed to clear history:", err);
+    } finally {
+      setIsDeletingHistory(false);
+    }
+  };
+
+  const clearForm = () => {
+    setInputText('');
+    setFile(null);
+    setResult(null);
+    setStreamingReasoning('');
+    setError(null);
+    setSubmissionId(null);
+    setIsCached(false);
+    setDisputeStatus('none');
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -255,7 +367,7 @@ const PublicHome: React.FC = () => {
           **คำแนะนำสำคัญ**:
           1. ให้ประเมินความน่าจะเป็นว่าเป็น AI หรือ มนุษย์ (0-100 โดยที่ 100 คือมั่นใจว่าเป็น AI แน่นอน)
           2. ให้คะแนนความมั่นใจ (Confidence Score 0-100) ในการวิเคราะห์ครั้งนี้
-          3. ให้คำอธิบายสั้นๆ เป็นข้อๆ (Bullet points) ในภาษาไทยที่เข้าใจง่าย
+          3. ให้คำอธิบายสั้นๆ กระชับที่สุด (Short and concise) เป็นข้อๆ (Bullet points) ในภาษาไทยที่เข้าใจง่าย ไม่เกิน 3-4 บรรทัด
           4. **สำคัญมาก**: แบ่งเนื้อหาที่ส่งมาออกเป็นส่วนๆ (Segments) และให้คะแนนความมั่นใจว่าเป็น AI (0-100) ในแต่ละส่วน เพื่อทำ Heatmap
           
           ส่งผลการวิเคราะห์ในรูปแบบ JSON ดังนี้:
@@ -395,26 +507,52 @@ const PublicHome: React.FC = () => {
     <div className="min-h-screen bg-[#f8fafc] text-zinc-900 font-sans selection:bg-blue-500/30 relative overflow-hidden">
       {/* Grand Background Elements */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
+        <FloatingParticles />
         <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-blue-100/40 rounded-full blur-[120px]" />
         <div className="absolute top-[20%] -right-[10%] w-[30%] h-[30%] bg-indigo-100/30 rounded-full blur-[100px]" />
         <div className="absolute -bottom-[10%] left-[20%] w-[50%] h-[50%] bg-sky-100/20 rounded-full blur-[150px]" />
       </div>
 
-      <header className="h-24 border-b border-zinc-200/50 flex items-center justify-between px-8 sticky top-0 bg-white/60 backdrop-blur-xl z-40">
+      <header className="h-20 md:h-24 border-b border-zinc-200/50 flex items-center justify-between px-4 md:px-8 sticky top-0 bg-white/60 backdrop-blur-xl z-40">
         <Logo />
-        <div className="flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm backdrop-blur-sm">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-          <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">ระบบพร้อมใช้งาน</span>
+        <div className="flex items-center gap-4">
+          <div className="hidden sm:flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm backdrop-blur-sm">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+            <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">ระบบพร้อมใช้งาน</span>
+          </div>
+          
+          {user ? (
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col items-end hidden md:flex">
+                <span className="text-xs font-bold text-zinc-900">{user.displayName}</span>
+                <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">{isAdmin ? 'Admin' : 'User'}</span>
+              </div>
+              <button 
+                onClick={logout}
+                className="p-2 bg-white border border-zinc-200 rounded-full hover:bg-zinc-50 transition-all shadow-sm"
+                title="ออกจากระบบ"
+              >
+                <X className="w-4 h-4 text-zinc-400" />
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={login}
+              className="px-4 py-2 bg-zinc-900 text-white text-[10px] font-black rounded-full uppercase tracking-widest hover:bg-zinc-800 transition-all shadow-lg"
+            >
+              Admin Login
+            </button>
+          )}
         </div>
       </header>
 
-      <main className="p-8 max-w-5xl mx-auto space-y-16 relative z-10">
-        <section className="space-y-8">
+      <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-8 md:space-y-16 relative z-10">
+        <section className="space-y-6 md:space-y-8">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
             <motion.div 
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-4"
+              className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2 md:mb-4"
             >
               <Zap className="w-3 h-3" />
               Powered by Gemini 3 Flash
@@ -422,7 +560,7 @@ const PublicHome: React.FC = () => {
             <motion.h2 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="text-4xl font-serif font-black tracking-tight text-zinc-900"
+              className="text-2xl md:text-4xl font-serif font-black tracking-tight text-zinc-900"
             >
               ตรวจสอบความโปร่งใสของข้อมูล
             </motion.h2>
@@ -430,7 +568,7 @@ const PublicHome: React.FC = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="text-zinc-500 text-lg leading-relaxed"
+              className="text-zinc-500 text-base md:text-lg leading-relaxed"
             >
               วางข้อความหรืออัปโหลดไฟล์เพื่อวิเคราะห์ความเป็นมนุษย์ vs AI ด้วยเทคโนโลยีตรวจจับที่แม่นยำที่สุด
             </motion.p>
@@ -439,39 +577,64 @@ const PublicHome: React.FC = () => {
           <motion.div 
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white/80 border border-white/20 rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] backdrop-blur-2xl overflow-hidden"
+            className="bg-white/80 border border-white/20 rounded-[1.5rem] md:rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] backdrop-blur-2xl overflow-hidden"
           >
-            <div className="p-8 space-y-8">
-              <div className="space-y-4">
+            <div className="p-6 md:p-8 space-y-6 md:space-y-8">
+              <div className="space-y-4 relative">
                 <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest">ข้อความที่ต้องการตรวจสอบ</label>
-                <textarea 
-                  placeholder="วางข้อความที่นี่..."
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  className="w-full h-64 bg-zinc-50 border border-zinc-200 rounded-2xl p-6 font-sans text-base focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
-                />
+                <div className="relative overflow-hidden rounded-2xl">
+                  <textarea 
+                    placeholder="วางข้อความที่นี่..."
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    className="w-full h-48 md:h-64 bg-zinc-50 border border-zinc-200 rounded-2xl p-4 md:p-6 font-sans text-base focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                  />
+                  {isAnalyzing && (
+                    <motion.div 
+                      className="absolute top-0 left-0 w-full h-1 bg-blue-400 shadow-[0_0_15px_rgba(96,165,250,0.8)] z-10"
+                      animate={{ top: ['0%', '100%', '0%'] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                    />
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest">อัปโหลดไฟล์ (DOCX, PDF, PNG)</label>
-                  <div className="relative">
-                    <input 
-                      type="file" 
-                      id="file-upload"
-                      className="hidden"
-                      onChange={handleFileChange}
-                      accept=".docx,.pdf,.png"
-                    />
-                    <label 
-                      htmlFor="file-upload"
-                      className="flex items-center justify-center gap-3 w-full py-4 border-2 border-dashed border-zinc-200 rounded-2xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
-                    >
-                      <Upload className="w-5 h-5 text-zinc-400 group-hover:text-blue-500" />
-                      <span className="text-sm font-medium text-zinc-500 group-hover:text-blue-600">
-                        {file ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์เพื่ออัปโหลด'}
-                      </span>
-                    </label>
+                  <div className="flex gap-4">
+                    <div className="relative flex-1">
+                      <input 
+                        type="file" 
+                        id="file-upload"
+                        className="hidden"
+                        onChange={handleFileChange}
+                        accept=".docx,.pdf,.png"
+                      />
+                      <label 
+                        htmlFor="file-upload"
+                        className="flex items-center justify-center gap-3 w-full py-4 border-2 border-dashed border-zinc-200 rounded-2xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
+                      >
+                        <motion.div
+                          whileHover={{ y: -4 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          <Upload className="w-5 h-5 text-zinc-400 group-hover:text-blue-500 transition-colors" />
+                        </motion.div>
+                        <span className="text-sm font-medium text-zinc-500 group-hover:text-blue-600">
+                          {file ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์เพื่ออัปโหลด'}
+                        </span>
+                      </label>
+                    </div>
+                    {(inputText || file) && (
+                      <button 
+                        onClick={clearForm}
+                        className="px-6 py-4 border border-zinc-200 rounded-2xl text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900 transition-all flex items-center gap-2 font-bold text-sm"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        ล้างข้อมูล
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -548,7 +711,12 @@ const PublicHome: React.FC = () => {
               exit={{ opacity: 0 }}
               className="space-y-8"
             >
-              <div className="bg-white/50 border border-zinc-200/50 rounded-[2.5rem] p-8 animate-pulse">
+              <div className="bg-white/50 border border-zinc-200/50 rounded-[2.5rem] p-8 animate-pulse relative overflow-hidden">
+                <motion.div 
+                  className="absolute top-0 left-0 w-full h-1 bg-blue-400/20 shadow-[0_0_15px_rgba(96,165,250,0.3)] z-10"
+                  animate={{ top: ['0%', '100%', '0%'] }}
+                  transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
                   <div className="aspect-square bg-zinc-100 rounded-full max-w-[300px] mx-auto" />
                   <div className="space-y-6">
@@ -577,17 +745,33 @@ const PublicHome: React.FC = () => {
                 </div>
               )}
 
-              <div className="bg-white border border-zinc-200 rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] p-10 space-y-12">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
-                  <div className="relative">
-                    <GaugeMeter score={result.score} label="ความน่าจะเป็นของ AI" />
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-zinc-900 text-white text-[10px] font-bold rounded-full uppercase tracking-widest"
-                    >
-                      {result.score > 50 ? 'AI Generated' : 'Human Written'}
-                    </motion.div>
+              <div className="bg-white border border-zinc-200 rounded-[1.5rem] md:rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] p-6 md:p-10 space-y-8 md:space-y-12">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-16 items-start">
+                  <div className="flex flex-col items-center gap-6">
+                    <div className="relative w-full max-w-[320px] pb-20">
+                      <GaugeMeter score={result.score} label="ความน่าจะเป็นของ AI" />
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={cn(
+                          "absolute bottom-0 left-1/2 -translate-x-1/2 px-6 py-2 text-white text-xs font-black rounded-full uppercase tracking-widest shadow-xl z-20 whitespace-nowrap",
+                          result.score > 50 ? "bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.4)]" : "bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.4)]"
+                        )}
+                      >
+                        {result.score > 50 ? 'AI Generated' : 'Human Written'}
+                      </motion.div>
+                    </div>
+
+                    <div className="flex gap-6 justify-center">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]" />
+                        <span className="text-[10px] font-mono text-zinc-400 font-bold uppercase tracking-widest">AI / ทุจริต</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+                        <span className="text-[10px] font-mono text-zinc-400 font-bold uppercase tracking-widest">มนุษย์ / ปกติ</span>
+                      </div>
+                    </div>
                   </div>
                   
                   <div className="space-y-8">
@@ -615,10 +799,16 @@ const PublicHome: React.FC = () => {
                           "ข้อมูลไม่เพียงพอที่จะระบุได้ชัดเจน ระบบมีความมั่นใจในการวิเคราะห์ต่ำเกินไป โปรดตรวจสอบด้วยตนเองเพิ่มเติม"
                         </div>
                       ) : (
-                        <>
+                        <div className="relative">
                           <Markdown>{streamingReasoning}</Markdown>
-                          {isAnalyzing && <span className="inline-block w-1.5 h-4 bg-blue-500 ml-1 animate-pulse" />}
-                        </>
+                          {isAnalyzing && (
+                            <motion.span 
+                              className="inline-block w-1 h-4 bg-blue-500 ml-1 align-middle"
+                              animate={{ opacity: [0, 1, 0] }}
+                              transition={{ duration: 0.8, repeat: Infinity }}
+                            />
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -643,24 +833,31 @@ const PublicHome: React.FC = () => {
                         <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-red-500 rounded-full" /> AI</div>
                       </div>
                     </div>
-                    <div className="p-8 bg-zinc-50 border border-zinc-100 rounded-[2rem] leading-relaxed text-zinc-800 font-serif text-lg">
+                    <div className="p-4 md:p-8 bg-zinc-50 border border-zinc-100 rounded-[1.5rem] md:rounded-[2rem] leading-relaxed text-zinc-800 font-serif text-base md:text-lg">
                       {result.heatmap.map((seg, i) => {
                         // Interpolate color based on score
                         // 0 (Human) -> Green, 100 (AI) -> Red
                         const isAI = seg.score > 50;
+                        const isHighAI = seg.score > 80;
                         const opacity = Math.abs(seg.score - 50) / 50 * 0.2 + 0.05;
                         const bgColor = isAI ? `rgba(239, 68, 68, ${opacity})` : `rgba(34, 197, 94, ${opacity})`;
                         const borderColor = isAI ? `rgba(239, 68, 68, ${opacity + 0.1})` : `rgba(34, 197, 94, ${opacity + 0.1})`;
                         
                         return (
-                          <span 
+                          <motion.span 
                             key={i} 
                             style={{ backgroundColor: bgColor, borderBottom: `2px solid ${borderColor}` }}
-                            className="px-0.5 rounded-sm transition-colors hover:brightness-95 cursor-help"
+                            className={cn(
+                              "px-0.5 rounded-sm transition-all hover:brightness-95 cursor-help inline-block",
+                              isHighAI && "animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.3)]"
+                            )}
                             title={`AI Confidence: ${seg.score}%`}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: i * 0.05 }}
                           >
                             {seg.text}
-                          </span>
+                          </motion.span>
                         );
                       })}
                     </div>
@@ -686,7 +883,13 @@ const PublicHome: React.FC = () => {
                           className="flex items-center gap-4 p-6 bg-green-50 border border-green-100 rounded-[2rem] text-green-700 shadow-sm"
                         >
                           <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
-                            <CheckCircle2 className="w-6 h-6" />
+                            <motion.div
+                              initial={{ scale: 0, rotate: -45 }}
+                              animate={{ scale: 1, rotate: 0 }}
+                              transition={{ type: "spring", stiffness: 200, damping: 10 }}
+                            >
+                              <CheckCircle2 className="w-6 h-6 text-green-500" />
+                            </motion.div>
                           </div>
                           <div className="flex flex-col">
                             <span className="text-sm font-black">ส่งคำโต้แย้งเรียบร้อยแล้ว</span>
@@ -739,12 +942,12 @@ const PublicHome: React.FC = () => {
                           <button 
                             onClick={handleDispute}
                             disabled={disputeStatus === 'submitting'}
-                            className="w-full py-4 bg-white border border-zinc-900 text-zinc-900 rounded-2xl text-sm font-black hover:bg-zinc-900 hover:text-white transition-all shadow-sm flex items-center justify-center gap-2"
+                            className="w-full py-4 bg-white border border-zinc-900 text-zinc-900 rounded-2xl text-sm font-black hover:bg-zinc-900 hover:text-white transition-all shadow-sm flex items-center justify-center gap-2 group"
                           >
                             {disputeStatus === 'submitting' ? (
                               <RefreshCw className="w-4 h-4 animate-spin" />
                             ) : (
-                              <AlertTriangle className="w-4 h-4" />
+                              <AlertTriangle className="w-4 h-4 group-hover:rotate-12 transition-transform" />
                             )}
                             ส่งคำโต้แย้งไปยังแอดมิน
                           </button>
@@ -757,6 +960,81 @@ const PublicHome: React.FC = () => {
             </motion.section>
           )}
         </AnimatePresence>
+
+        {/* History Section */}
+        {history.length > 0 && (
+          <motion.section 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="space-y-8 pt-16 border-t border-zinc-200/50"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white rounded-xl shadow-sm border border-zinc-100 flex items-center justify-center">
+                  <History className="w-5 h-5 text-zinc-400" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-serif font-black text-zinc-900">ประวัติการตรวจสอบล่าสุด</h3>
+                  <p className="text-xs text-zinc-500">ข้อมูล 5 รายการล่าสุดที่ถูกวิเคราะห์</p>
+                </div>
+              </div>
+              <button 
+                onClick={clearAllHistory}
+                disabled={isDeletingHistory}
+                className="px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-50 rounded-full transition-all flex items-center gap-2"
+              >
+                {isDeletingHistory ? <RefreshCw className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                ล้างประวัติทั้งหมด
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {history.map((item) => (
+                <motion.div 
+                  key={item.id}
+                  whileHover={{ y: -4 }}
+                  className="bg-white border border-zinc-200 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all group relative"
+                >
+                  <button 
+                    onClick={() => deleteHistoryItem(item.id)}
+                    className="absolute top-4 right-4 p-2 bg-zinc-50 rounded-full text-zinc-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-blue-500" />
+                      <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">
+                        {item.timestamp ? new Date(item.timestamp).toLocaleDateString('th-TH', { 
+                          day: 'numeric', 
+                          month: 'short', 
+                          year: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        }) : 'N/A'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-medium text-zinc-800 line-clamp-2 min-h-[2.5rem]">
+                      {item.text}
+                    </p>
+                    <div className="pt-4 border-t border-zinc-50 flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">สถานะ: วิเคราะห์แล้ว</span>
+                      <button 
+                        onClick={() => {
+                          setInputText(item.text);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="text-[10px] font-black text-blue-500 uppercase tracking-widest hover:underline"
+                      >
+                        ตรวจสอบอีกครั้ง
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.section>
+        )}
       </main>
 
       <footer className="p-12 text-center border-t border-zinc-100">
