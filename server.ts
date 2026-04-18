@@ -76,6 +76,10 @@ async function startServer() {
 // Global handle for Vercel
 export default app;
 
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  startServer();
+// 3. Execution entry point
+// Only run the server (listen) if not in a serverless environment (like Vercel)
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+  });
 }
