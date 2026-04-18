@@ -46,18 +46,41 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
       return res.status(response.status).json({ error: responseText });
     }
 
-    // Extract JSON from markdown code blocks if present
-    let jsonStr = responseText;
-    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+    // Parse the response as JSON first
+    let apiResponse;
+    try {
+      apiResponse = JSON.parse(responseText);
+      console.log('Parsed API response structure:', Object.keys(apiResponse));
+    } catch (e) {
+      console.error('Failed to parse API response as JSON:', e);
+      return res.status(502).json({ error: 'Invalid JSON response from ThaiLLM' });
+    }
+
+    // Extract content from the API response
+    let contentText = '';
+    if (apiResponse.choices && apiResponse.choices[0] && apiResponse.choices[0].message) {
+      contentText = apiResponse.choices[0].message.content;
+      console.log('Extracted content from API response, length:', contentText.length);
+    } else {
+      console.error('Unexpected API response structure');
+      return res.status(502).json({ error: 'Unexpected API response structure' });
+    }
+
+    // Extract JSON from markdown code blocks in the content
+    let jsonStr = contentText;
+    const jsonMatch = contentText.match(/```json\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       jsonStr = jsonMatch[1].trim();
-      console.log('Extracted JSON from markdown:', jsonStr);
+      console.log('Extracted JSON from markdown block, length:', jsonStr.length);
     } else {
-      // Try to find JSON object in the response
-      const jsonObjMatch = responseText.match(/\{[\s\S]*\}/);
+      console.log('No markdown JSON block found, trying to find raw JSON');
+      const jsonObjMatch = contentText.match(/\{[\s\S]*\}/);
       if (jsonObjMatch) {
         jsonStr = jsonObjMatch[0].trim();
-        console.log('Found JSON object in response:', jsonStr);
+        console.log('Found raw JSON object, length:', jsonStr.length);
+      } else {
+        console.error('No JSON found in content');
+        return res.status(502).json({ error: 'No JSON found in ThaiLLM response content' });
       }
     }
 
