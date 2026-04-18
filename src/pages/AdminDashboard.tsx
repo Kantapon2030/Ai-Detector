@@ -83,10 +83,17 @@ async function getEmbedding(text: string) {
 }
 
 const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
-  const [activeTab, setActiveTab] = useState<'history' | 'admin'>('admin');
+  const [activeTab, setActiveTab] = useState<'history' | 'admin' | 'api-status'>('admin');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [patterns, setPatterns] = useState<CheatingPattern[]>([]);
   const [analysisResults, setAnalysisResults] = useState<Record<string, AnalysisResult>>({});
+  const [apiHealth, setApiHealth] = useState<{
+    status: 'healthy' | 'degraded' | 'unhealthy' | 'loading';
+    totalModels: number;
+    workingModels: number;
+    models: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string }>;
+  } | null>(null);
+  const [isRefreshingApi, setIsRefreshingApi] = useState(false);
 
   useEffect(() => {
     const qSub = query(collection(db, 'submissions'), orderBy('timestamp', 'desc'));
@@ -114,6 +121,26 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
       unsubPat();
       unsubRes();
     };
+  }, []);
+
+  // API Health check
+  const checkApiHealth = async () => {
+    setIsRefreshingApi(true);
+    try {
+      const response = await fetch('/api/health');
+      const data = await response.json();
+      setApiHealth(data);
+    } catch (error) {
+      console.error('API health check failed:', error);
+      setApiHealth({ status: 'unhealthy', totalModels: 0, workingModels: 0, models: {} });
+    }
+    setIsRefreshingApi(false);
+  };
+
+  useEffect(() => {
+    checkApiHealth();
+    const interval = setInterval(checkApiHealth, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleLogout = () => signOut(auth);
@@ -186,6 +213,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
         <div className="flex-1 flex flex-col gap-6">
           <NavButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<Settings className="w-6 h-6" />} label="จัดการ" />
           <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History className="w-6 h-6" />} label="ประวัติ" />
+          <NavButton active={activeTab === 'api-status'} onClick={() => setActiveTab('api-status')} icon={<BrainCircuit className="w-6 h-6" />} label="สถานะ API" />
         </div>
 
         <button onClick={handleLogout} className="p-4 text-zinc-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-2xl group">
@@ -199,6 +227,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
             <h2 className="text-2xl font-serif font-black text-zinc-900 tracking-tight">
               {activeTab === 'history' && 'ประวัติการวิเคราะห์'}
               {activeTab === 'admin' && 'หน่วยความจำระบบ'}
+              {activeTab === 'api-status' && 'สถานะ API'}
             </h2>
             <div className="h-1.5 w-1.5 bg-zinc-300 rounded-full" />
             <div className="flex flex-col">
@@ -515,6 +544,110 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
                 )}
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'api-status' && (
+          <motion.div 
+            key="api-status"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="space-y-8"
+          >
+            {/* API Status Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <h3 className="text-2xl font-serif font-bold">สถานะการใช้งาน API</h3>
+                <button 
+                  onClick={checkApiHealth}
+                  disabled={isRefreshingApi}
+                  className="p-2 hover:bg-zinc-100 rounded-xl transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("w-5 h-5 text-zinc-500", isRefreshingApi && "animate-spin")} />
+                </button>
+              </div>
+              <div className={cn(
+                "px-4 py-2 rounded-full text-sm font-bold",
+                apiHealth?.status === 'healthy' && "bg-green-100 text-green-700",
+                apiHealth?.status === 'degraded' && "bg-orange-100 text-orange-700",
+                apiHealth?.status === 'unhealthy' && "bg-red-100 text-red-700",
+                apiHealth?.status === 'loading' && "bg-zinc-100 text-zinc-500"
+              )}>
+                {apiHealth?.status === 'loading' && 'กำลังโหลด...'}
+                {apiHealth?.status === 'healthy' && `พร้อมใช้งาน (${apiHealth.workingModels}/${apiHealth.totalModels})`}
+                {apiHealth?.status === 'degraded' && `บางส่วนไม่พร้อม (${apiHealth.workingModels}/${apiHealth.totalModels})`}
+                {apiHealth?.status === 'unhealthy' && 'ไม่พร้อมใช้งาน'}
+              </div>
+            </div>
+
+            {/* Working APIs */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-bold text-zinc-700 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-green-500" />
+                API ที่พร้อมใช้งาน ({apiHealth?.workingModels || 0})
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {apiHealth && Object.entries(apiHealth.models)
+                  .filter(([_, m]) => m.status === 'ok')
+                  .map(([name, m]) => (
+                    <div key={name} className="p-6 bg-white border border-green-200 rounded-2xl shadow-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="font-bold text-zinc-800 truncate">{name}</span>
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-green-600">
+                        <span className="font-mono">✓ พร้อมใช้งาน</span>
+                        {m.latency && (
+                          <>
+                            <span className="text-zinc-300">•</span>
+                            <span className="font-mono">{m.latency}ms</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                {(!apiHealth || Object.entries(apiHealth.models).filter(([_, m]) => m.status === 'ok').length === 0) && (
+                  <div className="col-span-full p-8 text-center text-zinc-400 text-sm">
+                    ไม่มี API ที่พร้อมใช้งาน
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Failed APIs with Error Logs */}
+            {apiHealth && Object.entries(apiHealth.models).filter(([_, m]) => m.status === 'error').length > 0 && (
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-red-700 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  API ที่ไม่สามารถใช้งานได้ ({Object.entries(apiHealth.models).filter(([_, m]) => m.status === 'error').length})
+                </h4>
+                <div className="space-y-4">
+                  {Object.entries(apiHealth.models)
+                    .filter(([_, m]) => m.status === 'error')
+                    .map(([name, m]) => (
+                      <div key={name} className="p-6 bg-red-50 border border-red-200 rounded-2xl">
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="font-bold text-red-800">{name}</span>
+                          <div className="w-2 h-2 bg-red-500 rounded-full" />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-xs text-red-600">
+                            <span className="font-bold">Error:</span> {m.message}
+                          </div>
+                          {m.errorDetails && (
+                            <div className="mt-3 p-3 bg-white border border-red-100 rounded-xl">
+                              <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider mb-2">Log Details:</div>
+                              <pre className="text-xs text-red-700 whitespace-pre-wrap break-all font-mono max-h-40 overflow-y-auto">
+                                {m.errorDetails}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
