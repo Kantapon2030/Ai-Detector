@@ -46,7 +46,15 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
       return res.status(response.status).json({ error: responseText });
     }
 
-    const data = JSON.parse(responseText);
+    // Extract JSON from markdown code blocks if present
+    let jsonStr = responseText;
+    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1];
+      console.log('Extracted JSON from markdown:', jsonStr);
+    }
+
+    const data = JSON.parse(jsonStr);
     res.json(data);
   } catch (error: any) {
     console.error('Proxy error:', error);
