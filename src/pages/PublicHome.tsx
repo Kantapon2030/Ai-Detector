@@ -98,6 +98,12 @@ const PublicHome: React.FC = () => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [selectedModel, setSelectedModel] = useState<'auto' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' | 'gemini-3.1-flash-live-preview' | 'thaillm-playground'>('auto');
   const [actualModelUsed, setActualModelUsed] = useState<string>('');
+  const [apiHealth, setApiHealth] = useState<{
+    status: 'healthy' | 'degraded' | 'unhealthy' | 'loading';
+    totalModels: number;
+    workingModels: number;
+    models: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number }>;
+  } | null>(null);
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
@@ -115,6 +121,24 @@ const PublicHome: React.FC = () => {
       setUser(u);
     });
     return () => unsubscribe();
+  }, []);
+
+  // API Health check on mount
+  React.useEffect(() => {
+    const checkApiHealth = async () => {
+      setApiHealth(prev => prev ? prev : { status: 'loading', totalModels: 0, workingModels: 0, models: {} });
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        setApiHealth(data);
+      } catch (error) {
+        setApiHealth({ status: 'unhealthy', totalModels: 0, workingModels: 0, models: {} });
+      }
+    };
+    checkApiHealth();
+    // Check every 30 seconds
+    const interval = setInterval(checkApiHealth, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // Real-time history listener
@@ -687,9 +711,46 @@ const PublicHome: React.FC = () => {
       <header className="h-16 md:h-24 border-b border-zinc-200/50 flex items-center justify-between px-4 md:px-8 sticky top-0 bg-white/60 backdrop-blur-xl z-40">
         <Logo />
         <div className="flex items-center gap-2 md:gap-4">
-          <div className="hidden lg:flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm backdrop-blur-sm">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-            <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">ระบบพร้อมใช้งาน</span>
+          {/* API Health Status */}
+          <div className="hidden lg:flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm backdrop-blur-sm group relative cursor-help" title={apiHealth ? Object.entries(apiHealth.models).map(([name, m]) => `${name}: ${m.status === 'ok' ? '✓' : '✗'}`).join('\n') : ''}>
+            {apiHealth?.status === 'loading' ? (
+              <>
+                <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">กำลังตรวจสอบ...</span>
+              </>
+            ) : apiHealth?.status === 'healthy' ? (
+              <>
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+                <span className="text-[10px] font-mono font-bold text-green-600 uppercase tracking-wider">API พร้อมใช้งาน ({apiHealth.workingModels}/{apiHealth.totalModels})</span>
+              </>
+            ) : apiHealth?.status === 'degraded' ? (
+              <>
+                <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(249,115,22,0.6)]" />
+                <span className="text-[10px] font-mono font-bold text-orange-600 uppercase tracking-wider">API บางส่วนไม่พร้อม ({apiHealth.workingModels}/{apiHealth.totalModels})</span>
+              </>
+            ) : apiHealth?.status === 'unhealthy' ? (
+              <>
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
+                <span className="text-[10px] font-mono font-bold text-red-600 uppercase tracking-wider">API ไม่พร้อมใช้งาน</span>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 bg-zinc-400 rounded-full" />
+                <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">ไม่ทราบสถานะ</span>
+              </>
+            )}
+            {/* Tooltip */}
+            {apiHealth && apiHealth.status !== 'healthy' && (
+              <div className="absolute top-full right-0 mt-2 w-64 p-3 bg-white border border-zinc-200 rounded-xl shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                <div className="text-xs font-bold text-zinc-700 mb-2">สถานะ API Models:</div>
+                {Object.entries(apiHealth.models).map(([name, m]) => (
+                  <div key={name} className={cn("flex items-center justify-between text-xs py-1", m.status === 'ok' ? 'text-green-600' : 'text-red-600')}>
+                    <span className="truncate max-w-[140px]">{name}</span>
+                    <span className="font-bold">{m.status === 'ok' ? '✓ พร้อม' : '✗ ไม่พร้อม'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           
           {user ? (

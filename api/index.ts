@@ -137,9 +137,93 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
   }
 });
 
-// Health check
-app.get('/api/health', (req: any, res: any) => {
-  res.json({ status: 'ok' });
+// Health check - test all API models
+app.get('/api/health', async (req: any, res: any) => {
+  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number }> = {};
+  
+  // Test Gemini models
+  const geminiModels = [
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-live-preview'
+  ];
+  
+  for (const model of geminiModels) {
+    const startTime = Date.now();
+    try {
+      // Use a simple test prompt
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'test' }] }],
+          generationConfig: { maxOutputTokens: 1 }
+        })
+      });
+      
+      const latency = Date.now() - startTime;
+      if (response.ok) {
+        results[model] = { status: 'ok', latency };
+      } else {
+        const errorText = await response.text();
+        results[model] = { status: 'error', message: `Status ${response.status}` };
+      }
+    } catch (error: any) {
+      results[model] = { status: 'error', message: error.message };
+    }
+  }
+  
+  // Test ThaiLLM
+  const thaillmModel = 'thaillm-playground';
+  const apiKey = process.env.THAILLM_API_KEY;
+  if (apiKey) {
+    const startTime = Date.now();
+    try {
+      const response = await fetch('https://thaillm.or.th/api/pathumma/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': apiKey
+        },
+        body: JSON.stringify({
+          model: '/model',
+          messages: [{ role: 'user', content: 'test' }],
+          max_tokens: 1
+        })
+      });
+      
+      const latency = Date.now() - startTime;
+      if (response.ok) {
+        results[thaillmModel] = { status: 'ok', latency };
+      } else {
+        results[thaillmModel] = { status: 'error', message: `Status ${response.status}` };
+      }
+    } catch (error: any) {
+      results[thaillmModel] = { status: 'error', message: error.message };
+    }
+  } else {
+    results[thaillmModel] = { status: 'error', message: 'API key not configured' };
+  }
+  
+  // Calculate overall status
+  const workingModels = Object.values(results).filter(r => r.status === 'ok').length;
+  const totalModels = Object.keys(results).length;
+  
+  let overallStatus: 'healthy' | 'degraded' | 'unhealthy';
+  if (workingModels === totalModels) {
+    overallStatus = 'healthy';
+  } else if (workingModels > 0) {
+    overallStatus = 'degraded';
+  } else {
+    overallStatus = 'unhealthy';
+  }
+  
+  res.json({
+    status: overallStatus,
+    totalModels,
+    workingModels,
+    models: results
+  });
 });
 
 // Vercel handler
