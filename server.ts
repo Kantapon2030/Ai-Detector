@@ -29,6 +29,9 @@ app.post('/api/analyze-thaillm', async (req, res) => {
     });
 
     const responseText = await response.text();
+    console.log('ThaiLLM Response Status:', response.status);
+    console.log('ThaiLLM Response:', responseText);
+
     try {
       const data = JSON.parse(responseText);
       if (!response.ok) {
