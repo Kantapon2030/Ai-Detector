@@ -50,7 +50,7 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
     let jsonStr = responseText;
     const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
-      jsonStr = jsonMatch[1];
+      jsonStr = jsonMatch[1].trim();
       console.log('Extracted JSON from markdown:', jsonStr);
     }
 
