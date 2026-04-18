@@ -53,18 +53,36 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
       console.log('Parsed API response structure:', Object.keys(apiResponse));
     } catch (e) {
       console.error('Failed to parse API response as JSON:', e);
+      console.error('Response text (first 500 chars):', responseText.substring(0, 500));
       return res.status(502).json({ error: 'Invalid JSON response from ThaiLLM' });
     }
 
-    // Extract content from the API response
-    let contentText = '';
-    if (apiResponse.choices && apiResponse.choices[0] && apiResponse.choices[0].message) {
-      contentText = apiResponse.choices[0].message.content;
-      console.log('Extracted content from API response, length:', contentText.length);
-    } else {
-      console.error('Unexpected API response structure');
-      return res.status(502).json({ error: 'Unexpected API response structure' });
+    // Validate API response structure
+    if (!apiResponse.choices) {
+      console.error('No choices field in API response');
+      console.error('API response keys:', Object.keys(apiResponse));
+      console.error('Full API response:', JSON.stringify(apiResponse, null, 2).substring(0, 1000));
+      return res.status(502).json({ error: 'No choices field in ThaiLLM response' });
     }
+
+    if (!apiResponse.choices[0]) {
+      console.error('Empty choices array');
+      return res.status(502).json({ error: 'Empty choices array in ThaiLLM response' });
+    }
+
+    if (!apiResponse.choices[0].message) {
+      console.error('No message field in choices[0]');
+      console.error('choices[0] keys:', Object.keys(apiResponse.choices[0]));
+      return res.status(502).json({ error: 'No message field in ThaiLLM response' });
+    }
+
+    // Extract content from the API response
+    let contentText = apiResponse.choices[0].message.content;
+    if (!contentText) {
+      console.error('No content in message');
+      return res.status(502).json({ error: 'No content in ThaiLLM message' });
+    }
+    console.log('Extracted content from API response, length:', contentText.length);
 
     // Extract JSON from markdown code blocks in the content
     let jsonStr = contentText;
