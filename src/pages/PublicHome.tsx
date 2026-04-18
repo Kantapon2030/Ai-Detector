@@ -96,7 +96,7 @@ const PublicHome: React.FC = () => {
   const [isCached, setIsCached] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [selectedModel, setSelectedModel] = useState<'auto' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' | 'gemini-3.1-flash-live-preview'>('auto');
+  const [selectedModel, setSelectedModel] = useState<'auto' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' | 'gemini-3.1-flash-live-preview' | 'thaillm-playground'>('auto');
   const [actualModelUsed, setActualModelUsed] = useState<string>('');
 
   // Client-side cache
@@ -463,20 +463,7 @@ const PublicHome: React.FC = () => {
         }
       }
 
-      parts.push({
-        text: `วิเคราะห์เนื้อหาต่อไปนี้:\n${finalPromptText}\n${ragContext}`
-      });
-
-    let retryCount = 0;
-    const maxRetries = 2;
-
-    const callGeminiAPI = async (): Promise<any> => {
-      try {
-        return await genAI.models.generateContentStream({
-          model: modelToUse,
-          contents: { parts },
-          config: {
-            systemInstruction: `
+      const systemInstruction = `
               คุณคือผู้เชี่ยวชาญด้านความโปร่งใสทางวิชาการ วิเคราะห์ข้อความเพื่อหาโอกาสในการใช้ AI สร้างข้อความ
               เกณฑ์: 1.ไวยากรณ์ 2.ความลึกซึ้ง 3.การใช้คำเชื่อม
               
@@ -493,77 +480,119 @@ const PublicHome: React.FC = () => {
                 "analysisDetails": { "grammar": "...", "depth": "...", "wordUsage": "..." },
                 "heatmap": [{ "text": "...", "score": 0-100 }]
               }
-            `,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                score: { type: Type.NUMBER },
-                confidenceScore: { type: Type.NUMBER },
-                reasoning: { type: Type.STRING },
-                analysisDetails: {
-                  type: Type.OBJECT,
-                  properties: {
-                    grammar: { type: Type.STRING },
-                    depth: { type: Type.STRING },
-                    wordUsage: { type: Type.STRING }
-                  },
-                  required: ["grammar", "depth", "wordUsage"]
-                },
-                heatmap: {
-                  type: Type.ARRAY,
-                  items: {
+            `;
+
+      parts.push({
+        text: `วิเคราะห์เนื้อหาต่อไปนี้:\n${finalPromptText}\n${ragContext}`
+      });
+
+    let retryCount = 0;
+    const maxRetries = 2;
+    let analysisResult: AnalysisResult;
+
+    if (modelToUse === 'thaillm-playground') {
+      const response = await fetch('https://thaillm.or.th/api/pathumma/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.THAILLM_API_KEY || ''
+        },
+        body: JSON.stringify({
+          model: '/model',
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `วิเคราะห์เนื้อหาต่อไปนี้:\n${finalPromptText}\n${ragContext}` }
+          ],
+          max_tokens: 2048,
+          temperature: 0.3
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`ThaiLLM API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content.replace(/```json\n?|```/g, '').trim();
+      analysisResult = JSON.parse(content);
+      analysisResult.modelUsed = 'ThaiLLM Playground';
+    } else {
+      const callGeminiAPI = async (): Promise<any> => {
+        try {
+          return await genAI.models.generateContentStream({
+            model: modelToUse,
+            contents: { parts },
+            config: {
+              systemInstruction: systemInstruction,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  score: { type: Type.NUMBER },
+                  confidenceScore: { type: Type.NUMBER },
+                  reasoning: { type: Type.STRING },
+                  analysisDetails: {
                     type: Type.OBJECT,
                     properties: {
-                      text: { type: Type.STRING },
-                      score: { type: Type.NUMBER }
+                      grammar: { type: Type.STRING },
+                      depth: { type: Type.STRING },
+                      wordUsage: { type: Type.STRING }
                     },
-                    required: ["text", "score"]
+                    required: ["grammar", "depth", "wordUsage"]
+                  },
+                  heatmap: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        text: { type: Type.STRING },
+                        score: { type: Type.NUMBER }
+                      },
+                      required: ["text", "score"]
+                    }
                   }
-                }
-              },
-              required: ["score", "confidenceScore", "reasoning", "analysisDetails", "heatmap"]
+                },
+                required: ["score", "confidenceScore", "reasoning", "analysisDetails", "heatmap"]
+              }
             }
+          });
+        } catch (err: any) {
+          if ((err.message?.includes('503') || err.message?.includes('UNAVAILABLE')) && retryCount < maxRetries) {
+            retryCount++;
+            const delay = Math.pow(2, retryCount) * 1000;
+            console.log(`Retrying analysis (attempt ${retryCount}) after ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+            return callGeminiAPI();
           }
-        });
-      } catch (err: any) {
-        if ((err.message?.includes('503') || err.message?.includes('UNAVAILABLE')) && retryCount < maxRetries) {
-          retryCount++;
-          const delay = Math.pow(2, retryCount) * 1000;
-          console.log(`Retrying analysis (attempt ${retryCount}) after ${delay}ms...`);
-          await new Promise(r => setTimeout(r, delay));
-          return callGeminiAPI();
+          throw err;
         }
-        throw err;
-      }
-    };
+      };
 
-    const responseStream = await callGeminiAPI();
+      const responseStream = await callGeminiAPI();
 
-    let fullText = "";
-      for await (const chunk of responseStream) {
-        const chunkText = chunk.text;
-        fullText += chunkText;
-        
-        // Simple regex fallback to show reasoning while streaming
-        // This is more robust than JSON.parse on partial text
-        const reasoningMatch = fullText.match(/"reasoning":\s*"((?:[^"\\]|\\.)*)"/);
-        if (reasoningMatch && reasoningMatch[1]) {
-          // Unescape newlines and other characters
-          const unescaped = reasoningMatch[1]
-            .replace(/\\n/g, '\n')
-            .replace(/\\r/g, '\r')
-            .replace(/\\t/g, '\t')
-            .replace(/\\"/g, '"')
-            .replace(/\\\\/g, '\\');
-          setStreamingReasoning(unescaped);
+      let fullText = "";
+        for await (const chunk of responseStream) {
+          const chunkText = chunk.text;
+          fullText += chunkText;
+          
+          const reasoningMatch = fullText.match(/"reasoning":\s*"((?:[^"\\]|\\.)*)"/);
+          if (reasoningMatch && reasoningMatch[1]) {
+            const unescaped = reasoningMatch[1]
+              .replace(/\\n/g, '\n')
+              .replace(/\\r/g, '\r')
+              .replace(/\\t/g, '\t')
+              .replace(/\\"/g, '"')
+              .replace(/\\\\/g, '\\');
+            setStreamingReasoning(unescaped);
+          }
         }
-      }
 
-      const analysisResult: AnalysisResult = JSON.parse(fullText);
+      analysisResult = JSON.parse(fullText);
       analysisResult.modelUsed = modelToUse;
-      setResult(analysisResult);
-      setStreamingReasoning(analysisResult.reasoning);
+    }
+
+    setResult(analysisResult);
+    setStreamingReasoning(analysisResult.reasoning);
       
       // Update client cache
       if (cacheKey) {
@@ -760,6 +789,7 @@ const PublicHome: React.FC = () => {
                       <option value="gemini-3.1-flash-lite-preview">⚡ Gemini 3.1 Flash Lite (เร็ว/ประหยัด)</option>
                       <option value="gemini-3-flash-preview">🎯 Gemini 3 Flash (แม่นยำสูง)</option>
                       <option value="gemini-3.1-flash-live-preview">🔥 Gemini 3.1 Flash Live (สดใหม่)</option>
+                      <option value="thaillm-playground">🇹🇭 ThaiLLM Playground (Pathumma)</option>
                     </select>
                     {(inputText || file) && (
                       <button 
