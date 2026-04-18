@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -29,14 +28,21 @@ app.post('/api/analyze-thaillm', async (req, res) => {
       body: JSON.stringify(req.body)
     });
 
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error('ThaiLLM API error:', data);
-      return res.status(response.status).json(data);
+    const responseText = await response.text();
+    try {
+      const data = JSON.parse(responseText);
+      if (!response.ok) {
+        console.error('ThaiLLM API error:', data);
+        return res.status(response.status).json(data);
+      }
+      res.json(data);
+    } catch (e) {
+      console.error('Invalid response from ThaiLLM:', responseText);
+      res.status(502).json({ 
+        error: 'Invalid response from ThaiLLM (Expected JSON)', 
+        raw: responseText.substring(0, 500) // Truncate to avoid huge logs
+      });
     }
-
-    res.json(data);
   } catch (error) {
     console.error('Proxy error:', error);
     res.status(500).json({ error: 'Internal server error during ThaiLLM analysis' });
@@ -52,6 +58,7 @@ async function startServer() {
   const PORT = 3000;
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
