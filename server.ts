@@ -11,13 +11,30 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
+// Debug middleware - log all requests
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  if (req.body) {
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
+
 // API Proxy for ThaiLLM (to fix CORS and hide API key)
 app.post('/api/analyze-thaillm', async (req, res) => {
+  console.log('=== ThaiLLM API Endpoint Hit ===');
   try {
     const apiKey = process.env.THAILLM_API_KEY;
+    console.log('API Key exists:', !!apiKey);
+    
     if (!apiKey) {
+      console.error('ERROR: THAILLM_API_KEY is not configured on the server');
       return res.status(500).json({ error: 'THAILLM_API_KEY is not configured on the server' });
     }
+
+    console.log('Sending request to ThaiLLM API...');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
 
     const response = await fetch('https://thaillm.or.th/api/pathumma/v1/chat/completions', {
       method: 'POST',
