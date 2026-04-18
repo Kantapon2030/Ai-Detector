@@ -12,7 +12,6 @@ export default defineConfig(({mode}) => {
     },
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.THAILLM_API_KEY': JSON.stringify(env.THAILLM_API_KEY),
     },
     resolve: {
       alias: {

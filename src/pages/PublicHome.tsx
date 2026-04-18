@@ -491,11 +491,10 @@ const PublicHome: React.FC = () => {
     let analysisResult: AnalysisResult;
 
     if (modelToUse === 'thaillm-playground') {
-      const response = await fetch('https://thaillm.or.th/api/pathumma/v1/chat/completions', {
+      const response = await fetch('/api/analyze-thaillm', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'apikey': process.env.THAILLM_API_KEY || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           model: '/model',
@@ -509,7 +508,8 @@ const PublicHome: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`ThaiLLM API error: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || `ThaiLLM API error: ${response.status}`);
       }
 
       const data = await response.json();
