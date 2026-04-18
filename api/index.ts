@@ -102,7 +102,21 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
       }
     }
 
-    const data = JSON.parse(jsonStr);
+    // Log the JSON before parsing
+    console.log('JSON to parse (first 500 chars):', jsonStr.substring(0, 500));
+    console.log('JSON to parse (last 200 chars):', jsonStr.substring(jsonStr.length - 200));
+
+    let data;
+    try {
+      data = JSON.parse(jsonStr);
+      console.log('Successfully parsed JSON');
+      console.log('Parsed data has keys:', Object.keys(data));
+    } catch (parseError: any) {
+      console.error('Failed to parse JSON:', parseError.message);
+      console.error('JSON content around error:', jsonStr.substring(Math.max(0, parseError.index - 50), parseError.index + 50));
+      return res.status(502).json({ error: 'Failed to parse JSON from ThaiLLM: ' + parseError.message });
+    }
+    
     res.json(data);
   } catch (error: any) {
     console.error('Proxy error:', error);
