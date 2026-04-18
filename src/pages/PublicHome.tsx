@@ -508,8 +508,23 @@ const PublicHome: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `ThaiLLM API error: ${response.status}`);
+        let errorMessage = `ThaiLLM API error (Status ${response.status})`;
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } else {
+          const text = await response.text();
+          console.error('Server error response:', text);
+        }
+        throw new Error(errorMessage);
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Expected JSON but received:', text);
+        throw new Error('Received non-JSON response from server');
       }
 
       const data = await response.json();
