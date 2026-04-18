@@ -116,8 +116,21 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
       console.error('JSON content around error:', jsonStr.substring(Math.max(0, parseError.index - 50), parseError.index + 50));
       return res.status(502).json({ error: 'Failed to parse JSON from ThaiLLM: ' + parseError.message });
     }
+
+    // Return in format that frontend expects: { choices: [{ message: { content: ... } }] }
+    // Frontend does: data.choices[0].message.content.replace(/```json\n?|```/g, '').trim()
+    const responseToClient = {
+      choices: [
+        {
+          message: {
+            content: JSON.stringify(data)
+          }
+        }
+      ]
+    };
     
-    res.json(data);
+    console.log('Sending response to client with format:', JSON.stringify(responseToClient).substring(0, 200));
+    res.json(responseToClient);
   } catch (error: any) {
     console.error('Proxy error:', error);
     res.status(500).json({ error: 'Internal server error: ' + error.message });
