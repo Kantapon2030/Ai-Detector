@@ -718,7 +718,7 @@ const PublicHome: React.FC = () => {
                 <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
                 <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">กำลังตรวจสอบ...</span>
               </>
-            ) : apiHealth?.status === 'healthy' ? (
+            ) : apiHealth && apiHealth.workingModels > 0 ? (
               <>
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                 <span className="text-[10px] font-mono font-bold text-green-600 uppercase tracking-wider">API พร้อมใช้งาน ({apiHealth.workingModels}/{apiHealth.totalModels})</span>

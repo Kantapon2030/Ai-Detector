@@ -39,10 +39,10 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
 
     const responseText = await response.text();
     console.log('ThaiLLM Response Status:', response.status);
-    console.log('ThaiLLM Response:', responseText);
+    console.log('ThaiLLM Response (first 300 chars):', responseText.substring(0, 300));
 
     if (!response.ok) {
-      console.error('ThaiLLM API error:', responseText);
+      console.error('ThaiLLM API error - Full response:', responseText);
       return res.status(response.status).json({ error: responseText });
     }
 
@@ -230,10 +230,6 @@ app.get('/api/health', async (req: any, res: any) => {
       console.error(`  Details: ${result.errorDetails}`);
     }
   });
-  
-  // Calculate overall status
-  const workingModels = Object.values(results).filter(r => r.status === 'ok').length;
-  const totalModels = Object.keys(results).length;
   
   let overallStatus: 'healthy' | 'degraded' | 'unhealthy';
   if (workingModels === totalModels) {
