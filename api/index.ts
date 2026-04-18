@@ -139,7 +139,9 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
 
 // Health check - test all API models
 app.get('/api/health', async (req: any, res: any) => {
-  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number }> = {};
+  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string }> = {};
+  
+  console.log('=== Starting API Health Check ===');
   
   // Test Gemini models
   const geminiModels = [
@@ -150,6 +152,7 @@ app.get('/api/health', async (req: any, res: any) => {
   
   for (const model of geminiModels) {
     const startTime = Date.now();
+    console.log(`Testing Gemini model: ${model}`);
     try {
       // Use a simple test prompt
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
@@ -163,19 +166,23 @@ app.get('/api/health', async (req: any, res: any) => {
       
       const latency = Date.now() - startTime;
       if (response.ok) {
+        console.log(`✓ ${model} - OK (${latency}ms)`);
         results[model] = { status: 'ok', latency };
       } else {
         const errorText = await response.text();
-        results[model] = { status: 'error', message: `Status ${response.status}` };
+        console.error(`✗ ${model} - Error: Status ${response.status}`, errorText.substring(0, 200));
+        results[model] = { status: 'error', message: `Status ${response.status}`, errorDetails: errorText.substring(0, 500) };
       }
     } catch (error: any) {
-      results[model] = { status: 'error', message: error.message };
+      console.error(`✗ ${model} - Exception:`, error.message);
+      results[model] = { status: 'error', message: error.message, errorDetails: error.stack };
     }
   }
   
   // Test ThaiLLM
   const thaillmModel = 'thaillm-playground';
   const apiKey = process.env.THAILLM_API_KEY;
+  console.log(`Testing ThaiLLM model: ${thaillmModel}`);
   if (apiKey) {
     const startTime = Date.now();
     try {
@@ -194,16 +201,35 @@ app.get('/api/health', async (req: any, res: any) => {
       
       const latency = Date.now() - startTime;
       if (response.ok) {
+        console.log(`✓ ${thaillmModel} - OK (${latency}ms)`);
         results[thaillmModel] = { status: 'ok', latency };
       } else {
-        results[thaillmModel] = { status: 'error', message: `Status ${response.status}` };
+        const errorText = await response.text();
+        console.error(`✗ ${thaillmModel} - Error: Status ${response.status}`, errorText.substring(0, 200));
+        results[thaillmModel] = { status: 'error', message: `Status ${response.status}`, errorDetails: errorText.substring(0, 500) };
       }
     } catch (error: any) {
-      results[thaillmModel] = { status: 'error', message: error.message };
+      console.error(`✗ ${thaillmModel} - Exception:`, error.message);
+      results[thaillmModel] = { status: 'error', message: error.message, errorDetails: error.stack };
     }
   } else {
-    results[thaillmModel] = { status: 'error', message: 'API key not configured' };
+    console.error(`✗ ${thaillmModel} - API key not configured`);
+    results[thaillmModel] = { status: 'error', message: 'API key not configured', errorDetails: 'THAILLM_API_KEY environment variable is not set' };
   }
+  
+  // Summary
+  const workingModels = Object.values(results).filter(r => r.status === 'ok').length;
+  const totalModels = Object.keys(results).length;
+  console.log(`=== Health Check Summary: ${workingModels}/${totalModels} models working ===`);
+  
+  // Log failed models details
+  Object.entries(results).forEach(([name, result]) => {
+    if (result.status === 'error') {
+      console.error(`Failed model: ${name}`);
+      console.error(`  Message: ${result.message}`);
+      console.error(`  Details: ${result.errorDetails}`);
+    }
+  });
   
   // Calculate overall status
   const workingModels = Object.values(results).filter(r => r.status === 'ok').length;
