@@ -154,7 +154,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
       
       await addDoc(collection(db, 'patterns'), {
         text: sub.text,
-        description: `α╕üα╕▓α╕úα╣üα╕üα╣ëα╣äα╕éα╣éα╕öα╕óα╕£α╕╣α╣ëα╕öα╕╣α╣üα╕Ñα╕úα╕░α╕Üα╕Ü (${user.email})`,
+        description: `ปรับปรุงการวิเคราะห์โดย ${user.email}`,
         label,
         embedding,
         timestamp: new Date().toISOString()
@@ -170,7 +170,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
   };
 
   const handleDeleteSubmission = async (id: string) => {
-    if (!window.confirm('α╕äα╕╕α╕ôα╣üα╕Öα╣êα╣âα╕êα╕½α╕úα╕╖α╕¡α╣äα╕íα╣êα╕ºα╣êα╕▓α╕òα╣ëα╕¡α╕çα╕üα╕▓α╕úα╕Ñα╕Üα╕éα╣ëα╕¡α╕íα╕╣α╕Ñα╕Öα╕╡α╣ë?')) return;
+    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบรายการนี้?')) return;
     try {
       await deleteDoc(doc(db, 'submissions', id));
       // Also delete analysis results
@@ -183,7 +183,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
   };
 
   const handleDeleteAllSubmissions = async () => {
-    if (!window.confirm('α╕äα╕╕α╕ôα╣üα╕Öα╣êα╣âα╕êα╕½α╕úα╕╖α╕¡α╣äα╕íα╣êα╕ºα╣êα╕▓α╕òα╣ëα╕¡α╕çα╕üα╕▓α╕úα╕Ñα╕Üα╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕ùα╕▒α╣ëα╕çα╕½α╕íα╕ö?')) return;
+    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลทั้งหมด?')) return;
     try {
       const q = query(collection(db, 'submissions'));
       const snap = await getDocs(q);
@@ -214,9 +214,9 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
         </div>
         
         <div className="flex-1 flex flex-col gap-6">
-          <NavButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<Settings className="w-6 h-6" />} label="α╕êα╕▒α╕öα╕üα╕▓α╕ú" />
-          <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History className="w-6 h-6" />} label="α╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤" />
-          <NavButton active={activeTab === 'api-status'} onClick={() => setActiveTab('api-status')} icon={<BrainCircuit className="w-6 h-6" />} label="α╕¡α╕┤α╕äα╕ºα╕▒α╕òα╕┤ API" />
+          <NavButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<Settings className="w-6 h-6" />} label="การตั้งค่า" />
+          <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History className="w-6 h-6" />} label="ประวัติ" />
+          <NavButton active={activeTab === 'api-status'} onClick={() => setActiveTab('api-status')} icon={<BrainCircuit className="w-6 h-6" />} label="สถานะ API" />
         </div>
 
         <button onClick={handleLogout} className="p-4 text-zinc-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-2xl group">
@@ -228,8 +228,9 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
         <header className="h-24 border-b border-zinc-200/50 flex items-center justify-between px-12 sticky top-0 bg-white/40 backdrop-blur-xl z-40">
           <div className="flex items-center gap-6">
             <h2 className="text-2xl font-serif font-black text-zinc-900 tracking-tight">
-              {activeTab === 'history' && 'α╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕üα╕▓α╕úα╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣î'}
-              {activeTab === 'admin' && 'α╕½α╕Öα╣êα╕ºα╕óα╕äα╕ºα╕▓α╕íα╕êα╕│α╕úα╕░α╕Üα╕Ü'}
+              {activeTab === 'history' && 'ประวัติการวิเคราะห์'}
+              {activeTab === 'admin' && 'การจัดการระบบ'}
+              {activeTab === 'api-status' && 'สถานะ API'}
             </h2>
             <div className="h-1.5 w-1.5 bg-zinc-300 rounded-full" />
             <div className="flex flex-col">
@@ -245,7 +246,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm">
               <Database className="w-4 h-4 text-blue-500" />
-              <span className="text-xs font-bold text-zinc-600">{patterns.length} α╕úα╕╣α╕¢α╣üα╕Üα╕Üα╕äα╕ºα╕▓α╕íα╕êα╕│</span>
+              <span className="text-xs font-bold text-zinc-600">{patterns.length} รูปแบบ</span>
             </div>
           </div>
         </header>
@@ -260,13 +261,13 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                 className="space-y-6"
               >
                 <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-2xl font-serif font-bold">α╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕ùα╕▒α╣ëα╕çα╕½α╕íα╕ö</h3>
+                  <h3 className="text-2xl font-serif font-bold">ประวัติการวิเคราะห์</h3>
                   <button 
                     onClick={handleDeleteAllSubmissions}
                     className="px-6 py-2 bg-red-50 text-red-600 border border-red-100 rounded-full text-xs font-bold hover:bg-red-600 hover:text-white transition-all flex items-center gap-2 shadow-sm"
                   >
                     <Trash2 className="w-4 h-4" />
-                    α╕Ñα╕Üα╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕ùα╕▒α╣ëα╕çα╕½α╕íα╕ö
+                    ลบทั้งหมด
                   </button>
                 </div>
                 <div className="grid grid-cols-1 gap-4">
@@ -290,9 +291,9 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                 className="space-y-8"
               >
                 <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-serif font-bold">α╕ºα╕çα╕êα╕úα╕üα╕▓α╕úα╣Çα╕úα╕╡α╕óα╕Öα╕úα╕╣α╣ë (Learning Loop)</h3>
+                  <h3 className="text-2xl font-serif font-bold">การจัดการระบบ (Learning Loop)</h3>
                   <div className="px-4 py-2 bg-white border border-zinc-200 rounded-full text-xs font-mono text-zinc-500 shadow-sm">
-                    α╕úα╕¡α╕üα╕▓α╕úα╕òα╕úα╕ºα╕êα╕¬α╕¡α╕Ü: {submissions.filter(s => s.status === 'analyzed').length}
+                    วิเคราะห์แล้ว: {submissions.filter(s => s.status === 'analyzed').length}
                   </div>
                 </div>
 
@@ -321,7 +322,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                               className="text-[10px] font-mono font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-lg shadow-orange-500/20"
                             >
                               <AlertTriangle className="w-3 h-3" />
-                              α╣éα╕òα╣ëα╣üα╕óα╣ëα╕çα╕öα╣êα╕ºα╕Ö
+                              ถูกโต้แย้ง
                             </motion.span>
                           )}
                         </div>
@@ -341,11 +342,11 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                           {sub.disputed && (
                             <div className="flex flex-col gap-1">
                               <span className="text-xs font-bold text-orange-600">
-                                α╕£α╕╣α╣ëα╣âα╕èα╣ëα╕óα╕╖α╕Öα╕óα╕▒α╕Öα╕ºα╣êα╕▓α╣Çα╕¢α╣çα╕Ö: {sub.disputeType === 'claim_human' ? 'α╕íα╕Öα╕╕α╕⌐α╕óα╣î' : 'AI'}
+                                ประเภท: {sub.disputeType === 'claim_human' ? 'อ้างว่าเป็นคน' : 'AI'}
                               </span>
                               {sub.disputeReason && (
                                 <span className="text-[10px] text-orange-500 italic">
-                                  α╣Çα╕½α╕òα╕╕α╕£α╕Ñ: {sub.disputeReason}
+                                  เหตุผล: {sub.disputeReason}
                                 </span>
                               )}
                             </div>
@@ -359,14 +360,14 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                           className="px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-600 hover:text-white transition-all flex items-center gap-2"
                         >
                           <AlertTriangle className="w-4 h-4" />
-                          α╕óα╕╖α╕Öα╕óα╕▒α╕Öα╕ºα╣êα╕▓α╕ùα╕╕α╕êα╕úα╕┤α╕ò
+                          ยืนยันว่าโกง
                         </button>
                         <button 
                           onClick={() => handleCorrect(sub, 'not_cheating')}
                           className="px-4 py-2 bg-green-50 text-green-600 border border-green-100 rounded-xl text-xs font-bold hover:bg-green-600 hover:text-white transition-all flex items-center gap-2"
                         >
                           <CheckCircle2 className="w-4 h-4" />
-                          α╕óα╕╖α╕Öα╕óα╕▒α╕Öα╕ºα╣êα╕▓α╕¢α╕üα╕òα╕┤
+                          ยืนยันว่าไม่โกง
                         </button>
                       </div>
                     </div>
@@ -374,7 +375,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                 </div>
 
                 <div className="space-y-4">
-                  <h4 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">α╕üα╕▓α╕úα╕¡α╕▒α╕¢α╣Çα╕öα╕òα╕äα╕ºα╕▓α╕íα╕êα╕│α╕Ñα╣êα╕▓α╕¬α╕╕α╕ö</h4>
+                  <h4 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">รูปแบบการทุจริตที่พบ</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {patterns.slice(0, 6).map(p => (
                       <div key={p.id} className="p-4 bg-white border border-zinc-100 rounded-2xl space-y-2 shadow-sm">
@@ -383,7 +384,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                             "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
                             p.label === 'cheating' ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"
                           )}>
-                            {p.label === 'cheating' ? 'α╕ùα╕╕α╕êα╕úα╕┤α╕ò' : 'α╕¢α╕üα╕òα╕┤'}
+                            {p.label === 'cheating' ? 'โกง' : 'ไม่โกง'}
                           </span>
                           <span className="text-[10px] font-mono text-zinc-400">{new Date(p.timestamp).toLocaleDateString()}</span>
                         </div>
@@ -530,12 +531,12 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
               )}
               {submission.disputed && (
                 <span className="text-[10px] font-mono font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-md shadow-orange-500/20">
-                  α╣éα╕òα╣ëα╣üα╕óα╣ëα╕ç
+                  ถูกโต้แย้ง
                 </span>
               )}
               <div className="h-1 w-1 bg-zinc-200 rounded-full" />
               <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">
-                {submission.status === 'pending' ? 'α╕üα╕│α╕Ñα╕▒α╕çα╕úα╕¡' : submission.status === 'analyzed' ? 'α╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣îα╣üα╕Ñα╣ëα╕º' : 'α╣üα╕üα╣ëα╣äα╕éα╣üα╕Ñα╣ëα╕º'}
+                {submission.status === 'pending' ? 'รอดำเนินการ' : submission.status === 'analyzed' ? 'วิเคราะห์แล้ว' : 'แก้ไขแล้ว'}
               </span>
             </div>
             <p className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">{new Date(submission.timestamp).toLocaleString()}</p>
@@ -546,7 +547,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
           {result && (
             <div className="flex gap-4">
               <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">α╕äα╕ºα╕▓α╕íα╕íα╕▒α╣êα╕Öα╣âα╕ê</div>
+                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">ความมั่นใจ</div>
                 <div className={cn(
                   "text-lg font-bold",
                   (result.confidenceScore || 0) < 60 ? "text-amber-500" : "text-blue-600"
@@ -556,7 +557,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
               </div>
               <div className="w-px h-8 bg-zinc-100" />
               <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">AI / α╕ùα╕╕α╕êα╕úα╕┤α╕ò</div>
+                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">AI / โกง</div>
                 <div className="text-lg font-bold text-red-500">{result.cheatingScore}%</div>
               </div>
             </div>
@@ -589,7 +590,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
           >
             <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div className="space-y-4">
-                <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">α╣Çα╕Öα╕╖α╣ëα╕¡α╕½α╕▓α╕ùα╕╡α╣êα╕¬α╣êα╕çα╕òα╕úα╕ºα╕êα╕¬α╕¡α╕Ü</h5>
+                <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">ข้อความที่ส่งมา</h5>
                 <div className="p-6 bg-white border border-zinc-100 rounded-2xl text-sm text-zinc-600 leading-relaxed font-sans shadow-inner">
                   {submission.text}
                 </div>
@@ -599,7 +600,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
                 {result ? (
                   <>
                     <div className="space-y-4">
-                      <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">α╣Çα╕½α╕òα╕╕α╕£α╕Ñα╕êα╕▓α╕üα╕üα╕▓α╕úα╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣î</h5>
+                      <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">เหตุผลการวิเคราะห์</h5>
                       <div className="prose prose-zinc prose-sm max-w-none text-zinc-600">
                         <Markdown>{result.reasoning}</Markdown>
                       </div>
@@ -608,15 +609,15 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
                     {result.analysisDetails && (
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 border-t border-zinc-100">
                         <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">α╣äα╕ºα╕óα╕▓α╕üα╕úα╕ôα╣î</span>
+                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">ไวยากรณ์</span>
                           <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.grammar}</p>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">α╕äα╕ºα╕▓α╕íα╕Ñα╕╢α╕üα╕ïα╕╢α╣ëα╕ç</span>
+                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">ความลึก</span>
                           <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.depth}</p>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">α╕üα╕▓α╕úα╣âα╕èα╣ëα╕äα╕│</span>
+                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">การใช้คำ</span>
                           <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.wordUsage}</p>
                         </div>
                       </div>
@@ -625,7 +626,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-zinc-400 gap-4">
                     <RefreshCw className="w-8 h-8 animate-spin" />
-                    <span className="text-xs font-mono uppercase tracking-widest">α╕üα╕│α╕Ñα╕▒α╕çα╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣î...</span>
+                    <span className="text-xs font-mono uppercase tracking-widest">กำลังวิเคราะห์...</span>
                   </div>
                 )}
               </div>
