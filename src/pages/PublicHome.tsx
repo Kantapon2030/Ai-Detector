@@ -196,7 +196,7 @@ const PublicHome: React.FC = () => {
   };
 
   // Load patterns in parallel with health check on mount
-  const { patterns: cachedPatterns, setPatterns, isLoading: patternsLoading } = usePatterns();
+  const { patterns: cachedPatterns, setPatterns } = usePatterns();
   
   React.useEffect(() => {
     const loadPatterns = async () => {
@@ -366,7 +366,7 @@ const PublicHome: React.FC = () => {
     });
   };
 
-  const performAnalysis = async () => {
+  const performAnalysis = async (patternsToUse: any[] | null = null) => {
     if (!inputText && !file) {
       setError('กรุณาป้อนข้อความหรืออัปโหลดไฟล์');
       return;
@@ -566,7 +566,6 @@ const PublicHome: React.FC = () => {
 
       // 2. RAG & Text Truncation
       let ragContext = "";
-      const { patterns: cachedPatterns } = usePatterns();
       
       if (promptText) {
         // Count words in Thai text
@@ -585,8 +584,8 @@ const PublicHome: React.FC = () => {
           }
           
           // Find similar patterns using token matching
-          if (cachedPatterns) {
-            const similarPatterns = cachedPatterns
+          if (patternsToUse) {
+            const similarPatterns = patternsToUse
               .map(p => {
                 const patternText = p.text || '';
                 const patternTokens: string[] = patternText.match(/[\u0E00-\u0E7F]+/g) || [];
@@ -618,8 +617,8 @@ const PublicHome: React.FC = () => {
           ]);
 
           // Use cached patterns from Context instead of fetching from Firebase
-          if (cachedPatterns) {
-            const similarPatterns = cachedPatterns
+          if (patternsToUse) {
+            const similarPatterns = patternsToUse
               .map(p => ({ ...p, similarity: cosineSimilarity(embedding, p.embedding) }))
               .filter(p => p.similarity > 0.7)
               .sort((a, b) => b.similarity - a.similarity)
@@ -1195,7 +1194,7 @@ const PublicHome: React.FC = () => {
               )}
 
               <button 
-                onClick={performAnalysis}
+                onClick={() => performAnalysis(cachedPatterns)}
                 disabled={isAnalyzing || (!inputText && !file)}
                 className="w-full py-5 bg-zinc-900 text-white font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl relative overflow-hidden group"
               >
