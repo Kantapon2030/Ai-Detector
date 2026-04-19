@@ -145,9 +145,9 @@ app.get('/api/health', async (req: any, res: any) => {
   
   // Test Gemini models
   const geminiModels = [
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash'
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-live-preview'
   ];
   
   for (const model of geminiModels) {
