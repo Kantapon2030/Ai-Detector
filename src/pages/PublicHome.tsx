@@ -50,6 +50,7 @@ import FloatingParticles from '../components/FloatingParticles';
 import LoadingScreen from '../components/LoadingScreen';
 import { classifyInput, detectSpecialization, selectModel, getNextModel, ModelRouting, HealthStatus } from '../lib/smartRouter';
 import { getApiHealthFromCache, saveApiHealthToCache, isCacheValid, getCacheAge } from '../lib/apiHealthCache';
+import { PatternsProvider, usePatterns } from '../contexts/PatternsContext';
 
 interface HeatmapSegment {
   text: string;
@@ -85,6 +86,14 @@ function cosineSimilarity(vecA: number[], vecB: number[]) {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+const PublicHomeWrapper: React.FC = () => {
+  return (
+    <PatternsProvider>
+      <PublicHome />
+    </PatternsProvider>
+  );
+};
+
 const PublicHome: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -105,9 +114,12 @@ const PublicHome: React.FC = () => {
   const [apiHealth, setApiHealth] = useState<HealthStatus | null>(null);
   const [isLoadingScreen, setIsLoadingScreen] = useState(true);
   const [usingCache, setUsingCache] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
+  const embeddingCache = React.useRef<Map<string, number[]>>(new Map());
+  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const hashText = async (text: string) => {
     const msgUint8 = new TextEncoder().encode(text);
@@ -170,6 +182,37 @@ const PublicHome: React.FC = () => {
     const interval = setInterval(checkApiHealth, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch patterns from Firebase (for loading screen)
+  const fetchPatterns = async () => {
+    try {
+      const patternsSnap = await getDocs(collection(db, 'patterns'));
+      const patterns = patternsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      return patterns;
+    } catch (error) {
+      console.error('Error fetching patterns:', error);
+      return [];
+    }
+  };
+
+  // Load patterns in parallel with health check on mount
+  const { patterns: cachedPatterns, setPatterns, isLoading: patternsLoading } = usePatterns();
+  
+  React.useEffect(() => {
+    const loadPatterns = async () => {
+      // If patterns are already in cache (from sessionStorage), skip fetch
+      if (cachedPatterns) {
+        console.log('Using cached patterns from sessionStorage');
+        return;
+      }
+      
+      console.log('Fetching patterns from Firebase...');
+      const patterns = await fetchPatterns();
+      setPatterns(patterns);
+    };
+    
+    loadPatterns();
+  }, [cachedPatterns, setPatterns]);
 
   // Real-time history listener
   React.useEffect(() => {
@@ -319,22 +362,36 @@ const PublicHome: React.FC = () => {
         const base64String = (reader.result as string).split(',')[1];
         resolve(base64String);
       };
-      reader.onerror = (error) => reject(error);
+      reader.onerror = reject;
     });
   };
 
   const performAnalysis = async () => {
-    if (!inputText && !file) return;
-    
-    // 0. Smart Cache Invalidation: Always clear previous result and cache
-    setResult(null);
-    setStreamingReasoning('');
-    setError(null);
-    setIsCached(false);
-    setDisputeStatus('none');
-    analysisCache.current.clear(); // Force fresh check from Firestore/API
-
+    if (!inputText && !file) {
+      setError('กรุณาป้อนข้อความหรืออัปโหลดไฟล์');
+      return;
+    }
     setIsAnalyzing(true);
+    setError(null);
+    setResult(null);
+    setActualModelUsed('');
+    setFallbackChain([]);
+    setSubmissionId(null);
+    setAnalysisProgress(0);
+
+    // Non-linear progress bar animation
+    const progressInterval = setInterval(() => {
+      setAnalysisProgress(prev => {
+        if (prev < 70) {
+          // Fast progress in first 70% (within 1 second)
+          return prev + 10;
+        } else if (prev < 90) {
+          // Slow progress in 70-90%
+          return prev + 2;
+        }
+        return prev;
+      });
+    }, 100);
 
     try {
       const cacheKey = inputText.trim();
@@ -509,31 +566,70 @@ const PublicHome: React.FC = () => {
 
       // 2. RAG & Text Truncation
       let ragContext = "";
+      const { patterns: cachedPatterns } = usePatterns();
+      
       if (promptText) {
-        // Truncate for embedding if too long (keep intro and conclusion)
-        const truncatedText = promptText.length > 2000 
-          ? promptText.slice(0, 1000) + "\n...\n" + promptText.slice(-1000)
-          : promptText;
+        // Count words in Thai text
+        const wordCount = promptText.split(/\s+/).filter(w => w.length > 0).length;
+        
+        // Skip embedding for short text (< 100 words) and use Thai tokenization instead
+        if (wordCount < 100) {
+          // Thai tokenization using Intl.Segmenter or RegExp fallback
+          let tokens: string[] = [];
+          if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+            const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
+            tokens = Array.from(segmenter.segment(promptText)).map(s => s.segment);
+          } else {
+            // Fallback: RegExp for Thai characters
+            tokens = promptText.match(/[\u0E00-\u0E7F]+/g) || [];
+          }
+          
+          // Find similar patterns using token matching
+          if (cachedPatterns) {
+            const similarPatterns = cachedPatterns
+              .map(p => {
+                const patternText = p.text || '';
+                const patternTokens: string[] = patternText.match(/[\u0E00-\u0E7F]+/g) || [];
+                const matchCount = tokens.filter(t => patternTokens.includes(t)).length;
+                const similarity = matchCount / Math.max(tokens.length, patternTokens.length);
+                return { ...p, similarity };
+              })
+              .filter(p => p.similarity > 0.3)
+              .sort((a, b) => b.similarity - a.similarity)
+              .slice(0, 5);
 
-        const [embedding] = await Promise.all([
-          genAI.models.embedContent({
-            model: 'gemini-embedding-2-preview',
-            contents: [truncatedText],
-          }).then(res => res.embeddings[0].values)
-        ]);
+            if (similarPatterns.length > 0) {
+              ragContext = "\n\n**ข้อมูลการเรียนรู้จากผู้ดูแลระบบ (Admin Learning Context)**:\n" + 
+                similarPatterns.map(p => `- คำตัดสิน: ${p.label === 'cheating' ? 'ทุจริต (AI)' : 'ปกติ (มนุษย์)'}\n  เนื้อหาใกล้เคียง: ${p.text.slice(0, 300)}...`).join('\n');
+            }
+          }
+        } else {
+          // Use embedding for longer text
+          // Truncate for embedding if too long (keep intro and conclusion)
+          const truncatedText = promptText.length > 2000 
+            ? promptText.slice(0, 1000) + "\n...\n" + promptText.slice(-1000)
+            : promptText;
 
-        // Fetch patterns for RAG
-        const patternsSnap = await getDocs(collection(db, 'patterns'));
-        const similarPatterns = patternsSnap.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as any))
-          .map(p => ({ ...p, similarity: cosineSimilarity(embedding, p.embedding) }))
-          .filter(p => p.similarity > 0.7) // Increased threshold for better accuracy
-          .sort((a, b) => b.similarity - a.similarity)
-          .slice(0, 5);
+          const [embedding] = await Promise.all([
+            genAI.models.embedContent({
+              model: 'gemini-embedding-2-preview',
+              contents: [truncatedText],
+            }).then(res => res.embeddings[0].values)
+          ]);
 
-        if (similarPatterns.length > 0) {
-          ragContext = "\n\n**ข้อมูลการเรียนรู้จากผู้ดูแลระบบ (Admin Learning Context)**:\n" + 
-            similarPatterns.map(p => `- คำตัดสิน: ${p.label === 'cheating' ? 'ทุจริต (AI)' : 'ปกติ (มนุษย์)'}\n  เนื้อหาใกล้เคียง: ${p.text.slice(0, 300)}...`).join('\n');
+          // Use cached patterns from Context instead of fetching from Firebase
+          if (cachedPatterns) {
+            const similarPatterns = cachedPatterns
+              .map(p => ({ ...p, similarity: cosineSimilarity(embedding, p.embedding) }))
+              .filter(p => p.similarity > 0.7)
+              .sort((a, b) => b.similarity - a.similarity)
+              .slice(0, 5);
+
+            if (similarPatterns.length > 0) {
+              ragContext = "\n\n**ข้อมูลการเรียนรู้จากผู้ดูแลระบบ (Admin Learning Context)**:\n" + 
+                similarPatterns.map(p => `- คำตัดสิน: ${p.label === 'cheating' ? 'ทุจริต (AI)' : 'ปกติ (มนุษย์)'}\n  เนื้อหาใกล้เคียง: ${p.text.slice(0, 300)}...`).join('\n');
+            }
+          }
         }
       }
 
@@ -718,6 +814,8 @@ const PublicHome: React.FC = () => {
 
     setResult(analysisResult);
     setStreamingReasoning(analysisResult.reasoning);
+    setAnalysisProgress(100);
+    clearInterval(progressInterval);
       
       // Update client cache
       if (cacheKey) {
@@ -751,6 +849,7 @@ const PublicHome: React.FC = () => {
 
     } catch (err: any) {
       console.error("Analysis failed:", err);
+      clearInterval(progressInterval);
       if (err.message?.includes('leaked')) {
         setError('⚠️ ตรวจพบว่า API Key หลุดสู่สาธารณะ (Leaked API Key) กรุณาติดต่อผู้ดูแลระบบเพื่อเปลี่ยน Key ใหม่ใน AI Studio Secrets');
       } else if (err.message?.includes('PERMISSION_DENIED')) {
@@ -762,6 +861,7 @@ const PublicHome: React.FC = () => {
       }
     } finally {
       setIsAnalyzing(false);
+      clearInterval(progressInterval);
     }
   };
 
@@ -782,6 +882,38 @@ const PublicHome: React.FC = () => {
       setError('ไม่สามารถส่งคำโต้แย้งได้ในขณะนี้');
       setDisputeStatus('none');
     }
+  };
+
+  // Debounced input handler for background embedding preparation
+  const handleInputChange = (text: string) => {
+    setInputText(text);
+    
+    // Clear previous timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    // Set new timer for debouncing (500ms)
+    debounceTimerRef.current = setTimeout(async () => {
+      // Generate embedding in background if text is long enough
+      if (text.length > 100 && !embeddingCache.current.has(text)) {
+        try {
+          const truncatedText = text.length > 2000 
+            ? text.slice(0, 1000) + "\n...\n" + text.slice(-1000)
+            : text;
+          
+          const embedding = await genAI.models.embedContent({
+            model: 'gemini-embedding-2-preview',
+            contents: [truncatedText],
+          }).then(res => res.embeddings[0].values);
+          
+          embeddingCache.current.set(text, embedding);
+          console.log('Embedding cached for background preparation');
+        } catch (error) {
+          console.error('Error generating background embedding:', error);
+        }
+      }
+    }, 500);
   };
 
   return (
@@ -934,7 +1066,7 @@ const PublicHome: React.FC = () => {
                   <textarea 
                     placeholder="วางข้อความที่นี่..."
                     value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
+                    onChange={(e) => handleInputChange(e.target.value)}
                     className="w-full h-48 md:h-64 bg-zinc-50 border border-zinc-200 rounded-2xl p-4 md:p-6 font-sans text-base focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
                   />
                   {isAnalyzing && (
@@ -1468,4 +1600,4 @@ function AnalysisDetailItemSkeleton() {
   );
 }
 
-export default PublicHome;
+export default PublicHomeWrapper;

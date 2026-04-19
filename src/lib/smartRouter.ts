@@ -17,6 +17,7 @@ export interface ModelHealth {
   status: 'ok' | 'error';
   latency?: number;
   message?: string;
+  errorType?: '503' | '429' | 'other';
 }
 
 export interface HealthStatus {
@@ -24,6 +25,36 @@ export interface HealthStatus {
   totalModels: number;
   workingModels: number;
   models: Record<string, ModelHealth>;
+}
+
+// Store latency history for moving average calculation
+const latencyHistory: Record<string, number[]> = {};
+const MAX_HISTORY_SIZE = 3;
+
+// Calculate moving average for a model's latency
+export function calculateMovingAverage(model: string, currentLatency: number): number {
+  if (!latencyHistory[model]) {
+    latencyHistory[model] = [];
+  }
+  
+  latencyHistory[model].push(currentLatency);
+  
+  // Keep only the last N values
+  if (latencyHistory[model].length > MAX_HISTORY_SIZE) {
+    latencyHistory[model] = latencyHistory[model].slice(-MAX_HISTORY_SIZE);
+  }
+  
+  const sum = latencyHistory[model].reduce((a, b) => a + b, 0);
+  return sum / latencyHistory[model].length;
+}
+
+// Check if model should be excluded due to hard limit errors
+export function shouldExcludeModel(health: ModelHealth): boolean {
+  // Hard limit: exclude immediately on 503 or 429 errors
+  if (health.errorType === '503' || health.errorType === '429') {
+    return true;
+  }
+  return false;
 }
 
 // Input Classifier: จำแนกประเภทข้อมูล
@@ -112,9 +143,40 @@ export function selectModel(
 
   // ถ้ามี health status ให้กรองเอาเฉพาะ model ที่พร้อมใช้งาน
   if (healthStatus && healthStatus.models) {
-    const workingModels = Object.entries(healthStatus.models)
+    // Apply hard limit: exclude models with 503/429 errors
+    const availableModels = Object.entries(healthStatus.models)
+      .filter(([_, health]) => !shouldExcludeModel(health))
       .filter(([_, health]) => health.status === 'ok')
-      .map(([name, _]) => name);
+      .map(([name, health]) => {
+        // Calculate moving average latency
+        const avgLatency = health.latency ? calculateMovingAverage(name, health.latency) : Infinity;
+        return { name, avgLatency };
+      });
+    
+    // Sort by latency (moving average) - fastest first
+    availableModels.sort((a, b) => a.avgLatency - b.avgLatency);
+    
+    const workingModels = availableModels.map(m => m.name);
+    
+    // Check if primary model should be excluded due to hard limit
+    if (primary && healthStatus.models[primary] && shouldExcludeModel(healthStatus.models[primary])) {
+      // Primary model excluded, use fastest available
+      if (availableModels.length > 0) {
+        primary = availableModels[0].name;
+      }
+    }
+    
+    // Check if primary model has high latency (> 3s) and switch to faster model
+    if (primary && healthStatus.models[primary] && healthStatus.models[primary].latency) {
+      const avgLatency = calculateMovingAverage(primary, healthStatus.models[primary].latency);
+      if (avgLatency > 3000) {
+        // Find fastest available model
+        const fastestModel = availableModels.find(m => m.name !== primary && m.avgLatency < 3000);
+        if (fastestModel) {
+          primary = fastestModel.name;
+        }
+      }
+    }
     
     // ถ้า primary ไม่พร้อม ให้เลือก fallback ตัวแรกที่พร้อม
     if (!workingModels.includes(primary)) {
