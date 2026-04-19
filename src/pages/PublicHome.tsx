@@ -47,6 +47,7 @@ import Logo from '../components/Logo';
 import Markdown from 'react-markdown';
 import { cn } from '../lib/utils';
 import FloatingParticles from '../components/FloatingParticles';
+import { classifyInput, detectSpecialization, selectModel, getNextModel, ModelRouting, HealthStatus } from '../lib/smartRouter';
 
 interface HeatmapSegment {
   text: string;
@@ -98,12 +99,8 @@ const PublicHome: React.FC = () => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [selectedModel, setSelectedModel] = useState<'auto' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' | 'gemini-3.1-flash-live-preview' | 'thaillm-playground'>('auto');
   const [actualModelUsed, setActualModelUsed] = useState<string>('');
-  const [apiHealth, setApiHealth] = useState<{
-    status: 'healthy' | 'degraded' | 'unhealthy' | 'loading';
-    totalModels: number;
-    workingModels: number;
-    models: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number }>;
-  } | null>(null);
+  const [fallbackChain, setFallbackChain] = useState<string[]>([]);
+  const [apiHealth, setApiHealth] = useState<HealthStatus | null>(null);
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
@@ -452,14 +449,28 @@ const PublicHome: React.FC = () => {
         finalPromptText = `${head}\n\n[...ส่วนกลางที่ถูกตัดออก...]\n\n${middle}\n\n[...ส่วนท้ายที่ถูกตัดออก...]\n\n${tail}`;
       }
 
-      // 1.6 Smart Routing
+      // 1.6 Smart Intelligent Router (SIR)
       let modelToUse: string = selectedModel;
+      let routing: ModelRouting | null = null;
+      
       if (selectedModel === 'auto') {
-        if (promptText.length < 1500 && !file) {
-          modelToUse = 'gemini-3.1-flash-lite-preview';
-        } else {
-          modelToUse = 'gemini-3-flash-preview';
-        }
+        // เลเยอร์ที่ 1: Input Classifier
+        const inputType = classifyInput(file, promptText);
+        
+        // เลเยอร์ที่ 2: Specialization Detection
+        const specialization = detectSpecialization(promptText, file);
+        
+        // เลเยอร์ที่ 2: Routing Logic (พิจารณา Health Status ด้วย)
+        routing = selectModel(inputType, specialization, apiHealth || undefined);
+        modelToUse = routing.primary;
+        setFallbackChain(routing.fallback);
+        
+        console.log('SIR Routing:', {
+          inputType,
+          specialization,
+          primary: modelToUse,
+          fallback: routing.fallback
+        });
       }
       setActualModelUsed(modelToUse);
 
@@ -522,124 +533,154 @@ const PublicHome: React.FC = () => {
         text: `วิเคราะห์เนื้อหาต่อไปนี้:\n${finalPromptText}\n${ragContext}`
       });
 
-    let retryCount = 0;
-    const maxRetries = 2;
+    // Intelligent Fallback Logic with Chain of Fallback
+    let currentModel = modelToUse;
+    let currentFallbackChain = selectedModel === 'auto' ? fallbackChain : [];
     let analysisResult: AnalysisResult;
+    let lastError: Error | null = null;
+    let attemptCount = 0;
+    const maxFallbackAttempts = currentFallbackChain.length + 1;
 
-    if (modelToUse === 'thaillm-playground') {
-      const response = await fetch('/api/analyze-thaillm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: '/model',
-          messages: [
-            { role: 'system', content: systemInstruction },
-            { role: 'user', content: `วิเคราะห์เนื้อหาต่อไปนี้:\n${finalPromptText}\n${ragContext}` }
-          ],
-          max_tokens: 2048,
-          temperature: 0.3
-        })
-      });
+    while (attemptCount < maxFallbackAttempts) {
+      attemptCount++;
+      console.log(`Attempt ${attemptCount}/${maxFallbackAttempts}: Using model ${currentModel}`);
+      
+      try {
+        if (currentModel === 'thaillm-playground') {
+          const response = await fetch('/api/analyze-thaillm', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: '/model',
+              messages: [
+                { role: 'system', content: systemInstruction },
+                { role: 'user', content: `วิเคราะห์เนื้อหาต่อไปนี้:\n${finalPromptText}\n${ragContext}` }
+              ],
+              max_tokens: 2048,
+              temperature: 0.3
+            })
+          });
 
-      if (!response.ok) {
-        let errorMessage = `ThaiLLM API error (Status ${response.status})`;
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
+          if (!response.ok) {
+            let errorMessage = `ThaiLLM API error (Status ${response.status})`;
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorMessage;
+            } else {
+              const text = await response.text();
+              console.error('Server error response:', text);
+            }
+            throw new Error(errorMessage);
+          }
+
+          const contentType = response.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('Expected JSON but received:', text);
+            throw new Error('Received non-JSON response from server');
+          }
+
+          const data = await response.json();
+          const content = data.choices[0].message.content.replace(/```json\n?|```/g, '').trim();
+          analysisResult = JSON.parse(content);
+          analysisResult.modelUsed = 'ThaiLLM Playground';
+          
+          // Success - break out of fallback loop
+          break;
         } else {
-          const text = await response.text();
-          console.error('Server error response:', text);
-        }
-        throw new Error(errorMessage);
-      }
-
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error('Expected JSON but received:', text);
-        throw new Error('Received non-JSON response from server');
-      }
-
-      const data = await response.json();
-      const content = data.choices[0].message.content.replace(/```json\n?|```/g, '').trim();
-      analysisResult = JSON.parse(content);
-      analysisResult.modelUsed = 'ThaiLLM Playground';
-    } else {
-      const callGeminiAPI = async (): Promise<any> => {
-        try {
-          return await genAI.models.generateContentStream({
-            model: modelToUse,
-            contents: { parts },
-            config: {
-              systemInstruction: systemInstruction,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  score: { type: Type.NUMBER },
-                  confidenceScore: { type: Type.NUMBER },
-                  reasoning: { type: Type.STRING },
-                  analysisDetails: {
-                    type: Type.OBJECT,
-                    properties: {
-                      grammar: { type: Type.STRING },
-                      depth: { type: Type.STRING },
-                      wordUsage: { type: Type.STRING }
-                    },
-                    required: ["grammar", "depth", "wordUsage"]
-                  },
-                  heatmap: {
-                    type: Type.ARRAY,
-                    items: {
+          // Gemini models
+          const callGeminiAPI = async (model: string): Promise<any> => {
+            return await genAI.models.generateContentStream({
+              model: model,
+              contents: { parts },
+              config: {
+                systemInstruction: systemInstruction,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    score: { type: Type.NUMBER },
+                    confidenceScore: { type: Type.NUMBER },
+                    reasoning: { type: Type.STRING },
+                    analysisDetails: {
                       type: Type.OBJECT,
                       properties: {
-                        text: { type: Type.STRING },
-                        score: { type: Type.NUMBER }
+                        grammar: { type: Type.STRING },
+                        depth: { type: Type.STRING },
+                        wordUsage: { type: Type.STRING }
                       },
-                      required: ["text", "score"]
+                      required: ["grammar", "depth", "wordUsage"]
+                    },
+                    heatmap: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          text: { type: Type.STRING },
+                          score: { type: Type.NUMBER }
+                        },
+                        required: ["text", "score"]
+                      }
                     }
-                  }
-                },
-                required: ["score", "confidenceScore", "reasoning", "analysisDetails", "heatmap"]
+                  },
+                  required: ["score", "confidenceScore", "reasoning", "analysisDetails", "heatmap"]
+                }
               }
+            });
+          };
+
+          const responseStream = await callGeminiAPI(currentModel);
+
+          let fullText = "";
+          for await (const chunk of responseStream) {
+            const chunkText = chunk.text;
+            fullText += chunkText;
+            
+            const reasoningMatch = fullText.match(/"reasoning":\s*"((?:[^"\\]|\\.)*)"/);
+            if (reasoningMatch && reasoningMatch[1]) {
+              const unescaped = reasoningMatch[1]
+                .replace(/\\n/g, '\n')
+                .replace(/\\r/g, '\r')
+                .replace(/\\t/g, '\t')
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, '\\');
+              setStreamingReasoning(unescaped);
             }
-          });
-        } catch (err: any) {
-          if ((err.message?.includes('503') || err.message?.includes('UNAVAILABLE')) && retryCount < maxRetries) {
-            retryCount++;
-            const delay = Math.pow(2, retryCount) * 1000;
-            console.log(`Retrying analysis (attempt ${retryCount}) after ${delay}ms...`);
-            await new Promise(r => setTimeout(r, delay));
-            return callGeminiAPI();
           }
-          throw err;
-        }
-      };
 
-      const responseStream = await callGeminiAPI();
-
-      let fullText = "";
-        for await (const chunk of responseStream) {
-          const chunkText = chunk.text;
-          fullText += chunkText;
+          analysisResult = JSON.parse(fullText);
+          analysisResult.modelUsed = currentModel;
           
-          const reasoningMatch = fullText.match(/"reasoning":\s*"((?:[^"\\]|\\.)*)"/);
-          if (reasoningMatch && reasoningMatch[1]) {
-            const unescaped = reasoningMatch[1]
-              .replace(/\\n/g, '\n')
-              .replace(/\\r/g, '\r')
-              .replace(/\\t/g, '\t')
-              .replace(/\\"/g, '"')
-              .replace(/\\\\/g, '\\');
-            setStreamingReasoning(unescaped);
-          }
+          // Success - break out of fallback loop
+          break;
         }
+      } catch (err: any) {
+        lastError = err;
+        console.error(`Model ${currentModel} failed:`, err.message);
+        
+        // Try next model in fallback chain
+        const nextModel = getNextModel(currentModel, currentFallbackChain);
+        if (nextModel) {
+          console.log(`Falling back to ${nextModel}...`);
+          currentModel = nextModel;
+        } else {
+          // No more fallbacks
+          console.error('All models failed');
+          break;
+        }
+      }
+    }
 
-      analysisResult = JSON.parse(fullText);
-      analysisResult.modelUsed = modelToUse;
+    // Check if all attempts failed
+    if (!analysisResult && lastError) {
+      if (selectedModel === 'auto') {
+        throw new Error(`ระบบ SIR ล้มเหลวทั้งหมด (ลอง ${maxFallbackAttempts} models): ${lastError.message}. กรุณาเลือกโมเดลด้วยตัวเองจาก dropdown`);
+      } else {
+        throw lastError;
+      }
     }
 
     setResult(analysisResult);
@@ -889,6 +930,29 @@ const PublicHome: React.FC = () => {
                       </button>
                     )}
                   </div>
+                  {/* SIR Info Display */}
+                  {selectedModel === 'auto' && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Bot className="w-4 h-4 text-blue-600" />
+                        <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Smart Intelligent Router (SIR)</span>
+                      </div>
+                      {actualModelUsed && (
+                        <div className="text-[10px] text-zinc-600 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">Model ที่ใช้:</span>
+                            <span className="font-mono text-blue-600">{actualModelUsed}</span>
+                          </div>
+                          {fallbackChain.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">Fallback Chain:</span>
+                              <span className="font-mono text-zinc-500">{fallbackChain.join(' → ')}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-4">

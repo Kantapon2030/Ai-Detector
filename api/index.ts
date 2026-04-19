@@ -137,9 +137,9 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
   }
 });
 
-// Health check - test all API models
+// Health check - test all API models with latency tracking
 app.get('/api/health', async (req: any, res: any) => {
-  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string }> = {};
+  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string; avgLatency?: number }> = {};
   
   console.log('=== Starting API Health Check ===');
   
@@ -222,6 +222,14 @@ app.get('/api/health', async (req: any, res: any) => {
   const totalModels = Object.keys(results).length;
   console.log(`=== Health Check Summary: ${workingModels}/${totalModels} models working ===`);
   
+  // Calculate average latency for working models
+  const workingLatencies = Object.entries(results)
+    .filter(([_, r]) => r.status === 'ok' && r.latency !== undefined)
+    .map(([_, r]) => r.latency!);
+  const avgLatency = workingLatencies.length > 0 
+    ? Math.round(workingLatencies.reduce((a, b) => a + b, 0) / workingLatencies.length)
+    : undefined;
+  
   // Log failed models details
   Object.entries(results).forEach(([name, result]) => {
     if (result.status === 'error') {
@@ -244,6 +252,7 @@ app.get('/api/health', async (req: any, res: any) => {
     status: overallStatus,
     totalModels,
     workingModels,
+    avgLatency,
     models: results
   });
 });
