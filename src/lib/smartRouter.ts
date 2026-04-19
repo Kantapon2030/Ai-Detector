@@ -54,6 +54,22 @@ export function shouldExcludeModel(health: ModelHealth): boolean {
   if (health.errorType === '503' || health.errorType === '429') {
     return true;
   }
+  
+  // Also exclude if status is error
+  if (health.status === 'error') {
+    return true;
+  }
+  
+  // Check if message contains error keywords
+  if (health.message) {
+    const errorMsg = health.message.toLowerCase();
+    if (errorMsg.includes('502') || errorMsg.includes('bad gateway') || 
+        errorMsg.includes('503') || errorMsg.includes('429') ||
+        errorMsg.includes('unavailable') || errorMsg.includes('timeout')) {
+      return true;
+    }
+  }
+  
   return false;
 }
 
@@ -157,6 +173,15 @@ export function selectModel(
     availableModels.sort((a, b) => a.avgLatency - b.avgLatency);
     
     const workingModels = availableModels.map(m => m.name);
+    
+    // If no models are available, return default Gemini models as fallback
+    if (availableModels.length === 0) {
+      console.warn('No models available from health check, using default Gemini models');
+      return {
+        primary: 'gemini-3.1-flash-live-preview',
+        fallback: ['gemini-3.1-flash-lite-preview', 'gemini-3-flash-preview']
+      };
+    }
     
     // Check if primary model should be excluded due to hard limit
     if (primary && healthStatus.models[primary] && shouldExcludeModel(healthStatus.models[primary])) {
