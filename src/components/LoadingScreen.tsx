@@ -82,12 +82,12 @@ const LoadingScreen: React.FC = () => {
           <motion.div
             className="mx-auto mb-6 relative"
             animate={{
-              rotate: [0, 360]
+              scale: [1, 1.05, 1]
             }}
             transition={{
-              duration: 20,
+              duration: 2,
               repeat: Infinity,
-              ease: "linear"
+              ease: "easeInOut"
             }}
           >
             <div className="w-24 h-24 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-3xl flex items-center justify-center shadow-2xl">
@@ -109,12 +109,26 @@ const LoadingScreen: React.FC = () => {
           </motion.div>
 
           {/* Logo Text */}
-          <h1 className="text-4xl md:text-5xl font-black text-zinc-900 mb-3 tracking-tight">
+          <h1 className="text-4xl md:text-5xl font-black text-zinc-900 mb-2 tracking-tight">
             พลิกเกมกลโกง
           </h1>
-          <p className="text-lg md:text-xl text-zinc-600 font-medium">
+          <p className="text-lg md:text-xl text-zinc-600 font-medium mb-4">
             AI ตรวจจับคำตอบที่สร้างโดยปัญญาประดิษฐ์
           </p>
+          <motion.div
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-full"
+            animate={{
+              opacity: [0.6, 1, 0.6]
+            }}
+            transition={{
+              duration: 1.5,
+              repeat: Infinity,
+              ease: "easeInOut"
+            }}
+          >
+            <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+            <span className="text-sm font-bold text-blue-600">กำลังโหลด...</span>
+          </motion.div>
         </motion.div>
 
         {/* Loading Steps */}
