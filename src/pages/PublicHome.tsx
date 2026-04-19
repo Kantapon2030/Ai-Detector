@@ -96,7 +96,7 @@ const PublicHome: React.FC = () => {
   const [isCached, setIsCached] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [selectedModel, setSelectedModel] = useState<'auto' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' | 'gemini-3.1-flash-live-preview' | 'thaillm-playground'>('auto');
+  const [selectedModel, setSelectedModel] = useState<'auto' | 'gemini-2.0-flash' | 'gemini-2.0-flash-lite' | 'gemini-1.5-flash' | 'thaillm-playground'>('auto');
   const [actualModelUsed, setActualModelUsed] = useState<string>('');
   const [apiHealth, setApiHealth] = useState<{
     status: 'healthy' | 'degraded' | 'unhealthy' | 'loading';
@@ -450,9 +450,9 @@ const PublicHome: React.FC = () => {
       let modelToUse: string = selectedModel;
       if (selectedModel === 'auto') {
         if (promptText.length < 1500 && !file) {
-          modelToUse = 'gemini-3.1-flash-lite-preview';
+          modelToUse = 'gemini-2.0-flash-lite';
         } else {
-          modelToUse = 'gemini-3-flash-preview';
+          modelToUse = 'gemini-2.0-flash';
         }
       }
       setActualModelUsed(modelToUse);
@@ -868,9 +868,9 @@ const PublicHome: React.FC = () => {
                       className="flex-1 px-4 py-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-sm font-medium text-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none cursor-pointer"
                     >
                       <option value="auto">🤖 Auto Routing (แนะนำ)</option>
-                      <option value="gemini-3.1-flash-lite-preview">⚡ Gemini 3.1 Flash Lite (เร็ว/ประหยัด)</option>
-                      <option value="gemini-3-flash-preview">🎯 Gemini 3 Flash (แม่นยำสูง)</option>
-                      <option value="gemini-3.1-flash-live-preview">🔥 Gemini 3.1 Flash Live (สดใหม่)</option>
+                      <option value="gemini-2.0-flash">⚡ Gemini 2.0 Flash (เร็ว/ประหยัด)</option>
+                      <option value="gemini-2.0-flash-lite">🎯 Gemini 2.0 Flash Lite (แม่นยำสูง)</option>
+                      <option value="gemini-1.5-flash">🔥 Gemini 1.5 Flash (สดใหม่)</option>
                       <option value="thaillm-playground">🇹🇭 ThaiLLM Playground (Pathumma)</option>
                     </select>
                     {(inputText || file) && (

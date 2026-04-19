@@ -79,6 +79,9 @@ async function getEmbedding(text: string) {
     model: 'gemini-embedding-2-preview',
     contents: [text],
   });
+  if (!result.embeddings?.[0]?.values) {
+    throw new Error('No embedding returned');
+  }
   return result.embeddings[0].values;
 }
 
@@ -111,7 +114,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
       const results: Record<string, AnalysisResult> = {};
       snapshot.docs.forEach(d => {
         const data = d.data() as AnalysisResult;
-        results[data.submissionId] = { id: d.id, ...data };
+        results[data.submissionId] = { ...data };
       });
       setAnalysisResults(results);
     });
