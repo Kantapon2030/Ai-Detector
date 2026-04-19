@@ -172,6 +172,12 @@ const PublicHome: React.FC = () => {
       console.error("Login failed:", err);
       if (err.code === 'auth/unauthorized-domain') {
         setError(`เกิดข้อผิดพลาด: โดเมนนี้ยังไม่ได้รับอนุญาตให้ใช้งาน Firebase Auth\n\nกรุณาเพิ่มโดเมนนี้ใน Firebase Console:\n${window.location.hostname}`);
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        // User closed the popup - this is normal, don't show error
+        console.log("Login popup closed by user");
+      } else if (err.code === 'auth/cancelled') {
+        // User cancelled - also normal
+        console.log("Login cancelled by user");
       } else {
         setError('เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
       }

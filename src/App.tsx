@@ -29,8 +29,16 @@ export default function App() {
   }, []);
 
   const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (err: any) {
+      console.error("Login failed:", err);
+      // Don't show error for popup-closed or cancelled - this is normal user behavior
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled') {
+        alert('เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      }
+    }
   };
 
   if (!isAuthReady) {
