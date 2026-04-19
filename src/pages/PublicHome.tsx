@@ -49,6 +49,7 @@ import { cn } from '../lib/utils';
 import FloatingParticles from '../components/FloatingParticles';
 import LoadingScreen from '../components/LoadingScreen';
 import { classifyInput, detectSpecialization, selectModel, getNextModel, ModelRouting, HealthStatus } from '../lib/smartRouter';
+import { getApiHealthFromCache, saveApiHealthToCache, isCacheValid, getCacheAge } from '../lib/apiHealthCache';
 
 interface HeatmapSegment {
   text: string;
@@ -103,6 +104,7 @@ const PublicHome: React.FC = () => {
   const [fallbackChain, setFallbackChain] = useState<string[]>([]);
   const [apiHealth, setApiHealth] = useState<HealthStatus | null>(null);
   const [isLoadingScreen, setIsLoadingScreen] = useState(true);
+  const [usingCache, setUsingCache] = useState(false);
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
@@ -126,16 +128,41 @@ const PublicHome: React.FC = () => {
   React.useEffect(() => {
     const checkApiHealth = async () => {
       setApiHealth(prev => prev ? prev : { status: 'loading', totalModels: 0, workingModels: 0, models: {} });
-      try {
-        const response = await fetch('/api/health');
-        const data = await response.json();
-        setApiHealth(data);
-        // Hide loading screen after health check completes
-        setTimeout(() => setIsLoadingScreen(false), 500);
-      } catch (error) {
-        setApiHealth({ status: 'unhealthy', totalModels: 0, workingModels: 0, models: {} });
-        // Hide loading screen even if health check fails
-        setTimeout(() => setIsLoadingScreen(false), 500);
+      
+      // Try to get from cache first
+      const cachedData = await getApiHealthFromCache();
+      
+      if (cachedData) {
+        // Use cached data - hide loading screen immediately for faster load
+        console.log('Using cached API health data');
+        setApiHealth(cachedData);
+        setUsingCache(true);
+        setTimeout(() => setIsLoadingScreen(false), 100); // Very short delay
+      } else {
+        // No valid cache - fetch fresh data
+        setUsingCache(false);
+        try {
+          const response = await fetch('/api/health');
+          const data = await response.json();
+          setApiHealth(data);
+          
+          // Save to cache for future use
+          await saveApiHealthToCache({
+            timestamp: new Date().toISOString(),
+            status: data.status,
+            totalModels: data.totalModels,
+            workingModels: data.workingModels,
+            avgLatency: data.avgLatency,
+            models: data.models
+          });
+          
+          // Hide loading screen after health check completes
+          setTimeout(() => setIsLoadingScreen(false), 500);
+        } catch (error) {
+          setApiHealth({ status: 'unhealthy', totalModels: 0, workingModels: 0, models: {} });
+          // Hide loading screen even if health check fails
+          setTimeout(() => setIsLoadingScreen(false), 500);
+        }
       }
     };
     checkApiHealth();
@@ -762,7 +789,7 @@ const PublicHome: React.FC = () => {
       {/* Loading Screen */}
       <AnimatePresence>
         {isLoadingScreen && (
-          <LoadingScreen />
+          <LoadingScreen usingCache={usingCache} />
         )}
       </AnimatePresence>
 

@@ -9,7 +9,11 @@ interface LoadingStep {
   status: 'pending' | 'loading' | 'completed';
 }
 
-const LoadingScreen: React.FC = () => {
+interface LoadingScreenProps {
+  usingCache?: boolean;
+}
+
+const LoadingScreen: React.FC<LoadingScreenProps> = ({ usingCache = false }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [steps, setSteps] = useState<LoadingStep[]>([
     { id: 'init', label: 'เริ่มต้นระบบ', icon: <BrainCircuit className="w-5 h-5" />, status: 'pending' },
@@ -235,9 +239,29 @@ const LoadingScreen: React.FC = () => {
           transition={{ delay: 0.8 }}
           className="mt-8 text-center"
         >
-          <p className="text-xs text-zinc-400 font-medium">
-            กำลังเตรียมระบบ Smart Intelligent Router (SIR)
-          </p>
+          <motion.div
+            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-50 border border-zinc-200 rounded-full"
+            animate={{
+              opacity: [0.6, 1, 0.6]
+            }}
+            transition={{
+              duration: 1.5,
+              repeat: Infinity,
+              ease: "easeInOut"
+            }}
+          >
+            {usingCache ? (
+              <>
+                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                <span className="text-xs font-bold text-zinc-600">ใช้ข้อมูลจากแคช</span>
+              </>
+            ) : (
+              <>
+                <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                <span className="text-xs font-bold text-zinc-600">กำลังตรวจสอบ API...</span>
+              </>
+            )}
+          </motion.div>
         </motion.div>
       </div>
     </div>
