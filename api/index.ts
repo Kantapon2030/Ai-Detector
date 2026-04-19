@@ -139,7 +139,7 @@ app.post('/api/analyze-thaillm', async (req: any, res: any) => {
 
 // Health check - test all API models with latency tracking
 app.get('/api/health', async (req: any, res: any) => {
-  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string; avgLatency?: number }> = {};
+  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string; avgLatency?: number; errorType?: '503' | '429' | '502' | 'other' }> = {};
   
   console.log('=== Starting API Health Check ===');
   
@@ -170,8 +170,14 @@ app.get('/api/health', async (req: any, res: any) => {
         results[model] = { status: 'ok', latency };
       } else {
         const errorText = await response.text();
-        console.error(`✗ ${model} - Error: Status ${response.status}`, errorText.substring(0, 200));
-        results[model] = { status: 'error', message: `Status ${response.status}`, errorDetails: errorText.substring(0, 500) };
+        const status = response.status;
+        let errorType: '503' | '429' | '502' | 'other' = 'other';
+        if (status === 503) errorType = '503';
+        else if (status === 429) errorType = '429';
+        else if (status === 502) errorType = '502';
+        
+        console.error(`✗ ${model} - Error: Status ${status}`, errorText.substring(0, 200));
+        results[model] = { status: 'error', message: `Status ${status}`, errorDetails: errorText.substring(0, 500), errorType };
       }
     } catch (error: any) {
       console.error(`✗ ${model} - Exception:`, error.message);
@@ -205,8 +211,19 @@ app.get('/api/health', async (req: any, res: any) => {
         results[thaillmModel] = { status: 'ok', latency };
       } else {
         const errorText = await response.text();
-        console.error(`✗ ${thaillmModel} - Error: Status ${response.status}`, errorText.substring(0, 200));
-        results[thaillmModel] = { status: 'error', message: `Status ${response.status}`, errorDetails: errorText.substring(0, 500) };
+        const status = response.status;
+        let errorType: '503' | '429' | '502' | 'other' = 'other';
+        if (status === 503) errorType = '503';
+        else if (status === 429) errorType = '429';
+        else if (status === 502) errorType = '502';
+        
+        // Also check if response is HTML (error page)
+        if (errorText.includes('<!DOCTYPE html>') || errorText.includes('502') || errorText.includes('Bad gateway')) {
+          errorType = '502';
+        }
+        
+        console.error(`✗ ${thaillmModel} - Error: Status ${status}`, errorText.substring(0, 200));
+        results[thaillmModel] = { status: 'error', message: `Status ${status}`, errorDetails: errorText.substring(0, 500), errorType };
       }
     } catch (error: any) {
       console.error(`✗ ${thaillmModel} - Exception:`, error.message);
