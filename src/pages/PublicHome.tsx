@@ -47,6 +47,7 @@ import Logo from '../components/Logo';
 import Markdown from 'react-markdown';
 import { cn } from '../lib/utils';
 import FloatingParticles from '../components/FloatingParticles';
+import LoadingScreen from '../components/LoadingScreen';
 import { classifyInput, detectSpecialization, selectModel, getNextModel, ModelRouting, HealthStatus } from '../lib/smartRouter';
 
 interface HeatmapSegment {
@@ -101,6 +102,7 @@ const PublicHome: React.FC = () => {
   const [actualModelUsed, setActualModelUsed] = useState<string>('');
   const [fallbackChain, setFallbackChain] = useState<string[]>([]);
   const [apiHealth, setApiHealth] = useState<HealthStatus | null>(null);
+  const [isLoadingScreen, setIsLoadingScreen] = useState(true);
 
   // Client-side cache
   const analysisCache = React.useRef<Map<string, AnalysisResult>>(new Map());
@@ -128,8 +130,12 @@ const PublicHome: React.FC = () => {
         const response = await fetch('/api/health');
         const data = await response.json();
         setApiHealth(data);
+        // Hide loading screen after health check completes
+        setTimeout(() => setIsLoadingScreen(false), 500);
       } catch (error) {
         setApiHealth({ status: 'unhealthy', totalModels: 0, workingModels: 0, models: {} });
+        // Hide loading screen even if health check fails
+        setTimeout(() => setIsLoadingScreen(false), 500);
       }
     };
     checkApiHealth();
@@ -752,7 +758,16 @@ const PublicHome: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-zinc-900 font-sans selection:bg-blue-500/30 relative overflow-hidden">
+    <>
+      {/* Loading Screen */}
+      <AnimatePresence>
+        {isLoadingScreen && (
+          <LoadingScreen />
+        )}
+      </AnimatePresence>
+
+      {/* Main Content */}
+      <div className="min-h-screen bg-[#f8fafc] text-zinc-900 font-sans selection:bg-blue-500/30 relative overflow-hidden">
       {/* Grand Background Elements */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
         <FloatingParticles />
@@ -1404,6 +1419,7 @@ const PublicHome: React.FC = () => {
         </p>
       </footer>
     </div>
+    </>
   );
 };
 
