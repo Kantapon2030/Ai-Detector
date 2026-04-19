@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { 
   Shield, 
   History, 
@@ -151,7 +151,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
       
       await addDoc(collection(db, 'patterns'), {
         text: sub.text,
-        description: `การแก้ไขโดยผู้ดูแลระบบ (${user.email})`,
+        description: `α╕üα╕▓α╕úα╣üα╕üα╣ëα╣äα╕éα╣éα╕öα╕óα╕£α╕╣α╣ëα╕öα╕╣α╣üα╕Ñα╕úα╕░α╕Üα╕Ü (${user.email})`,
         label,
         embedding,
         timestamp: new Date().toISOString()
@@ -167,7 +167,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
   };
 
   const handleDeleteSubmission = async (id: string) => {
-    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลนี้?')) return;
+    if (!window.confirm('α╕äα╕╕α╕ôα╣üα╕Öα╣êα╣âα╕êα╕½α╕úα╕╖α╕¡α╣äα╕íα╣êα╕ºα╣êα╕▓α╕òα╣ëα╕¡α╕çα╕üα╕▓α╕úα╕Ñα╕Üα╕éα╣ëα╕¡α╕íα╕╣α╕Ñα╕Öα╕╡α╣ë?')) return;
     try {
       await deleteDoc(doc(db, 'submissions', id));
       // Also delete analysis results
@@ -180,7 +180,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
   };
 
   const handleDeleteAllSubmissions = async () => {
-    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบประวัติทั้งหมด?')) return;
+    if (!window.confirm('α╕äα╕╕α╕ôα╣üα╕Öα╣êα╣âα╕êα╕½α╕úα╕╖α╕¡α╣äα╕íα╣êα╕ºα╣êα╕▓α╕òα╣ëα╕¡α╕çα╕üα╕▓α╕úα╕Ñα╕Üα╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕ùα╕▒α╣ëα╕çα╕½α╕íα╕ö?')) return;
     try {
       const q = query(collection(db, 'submissions'));
       const snap = await getDocs(q);
@@ -211,9 +211,9 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
         </div>
         
         <div className="flex-1 flex flex-col gap-6">
-          <NavButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<Settings className="w-6 h-6" />} label="จัดการ" />
-          <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History className="w-6 h-6" />} label="ประวัติ" />
-          <NavButton active={activeTab === 'api-status'} onClick={() => setActiveTab('api-status')} icon={<BrainCircuit className="w-6 h-6" />} label="สถานะ API" />
+          <NavButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<Settings className="w-6 h-6" />} label="α╕êα╕▒α╕öα╕üα╕▓α╕ú" />
+          <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History className="w-6 h-6" />} label="α╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤" />
+          <NavButton active={activeTab === 'api-status'} onClick={() => setActiveTab('api-status')} icon={<BrainCircuit className="w-6 h-6" />} label="α╕¡α╕┤α╕äα╕ºα╕▒α╕òα╕┤ API" />
         </div>
 
         <button onClick={handleLogout} className="p-4 text-zinc-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-2xl group">
@@ -225,9 +225,8 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
         <header className="h-24 border-b border-zinc-200/50 flex items-center justify-between px-12 sticky top-0 bg-white/40 backdrop-blur-xl z-40">
           <div className="flex items-center gap-6">
             <h2 className="text-2xl font-serif font-black text-zinc-900 tracking-tight">
-              {activeTab === 'history' && 'ประวัติการวิเคราะห์'}
-              {activeTab === 'admin' && 'หน่วยความจำระบบ'}
-              {activeTab === 'api-status' && 'สถานะ API'}
+              {activeTab === 'history' && 'α╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕üα╕▓α╕úα╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣î'}
+              {activeTab === 'admin' && 'α╕½α╕Öα╣êα╕ºα╕óα╕äα╕ºα╕▓α╕íα╕êα╕│α╕úα╕░α╕Üα╕Ü'}
             </h2>
             <div className="h-1.5 w-1.5 bg-zinc-300 rounded-full" />
             <div className="flex flex-col">
@@ -243,7 +242,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm">
               <Database className="w-4 h-4 text-blue-500" />
-              <span className="text-xs font-bold text-zinc-600">{patterns.length} รูปแบบความจำ</span>
+              <span className="text-xs font-bold text-zinc-600">{patterns.length} α╕úα╕╣α╕¢α╣üα╕Üα╕Üα╕äα╕ºα╕▓α╕íα╕êα╕│</span>
             </div>
           </div>
         </header>
@@ -258,13 +257,13 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                 className="space-y-6"
               >
                 <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-2xl font-serif font-bold">ประวัติทั้งหมด</h3>
+                  <h3 className="text-2xl font-serif font-bold">α╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕ùα╕▒α╣ëα╕çα╕½α╕íα╕ö</h3>
                   <button 
                     onClick={handleDeleteAllSubmissions}
                     className="px-6 py-2 bg-red-50 text-red-600 border border-red-100 rounded-full text-xs font-bold hover:bg-red-600 hover:text-white transition-all flex items-center gap-2 shadow-sm"
                   >
                     <Trash2 className="w-4 h-4" />
-                    ลบประวัติทั้งหมด
+                    α╕Ñα╕Üα╕¢α╕úα╕░α╕ºα╕▒α╕òα╕┤α╕ùα╕▒α╣ëα╕çα╕½α╕íα╕ö
                   </button>
                 </div>
                 <div className="grid grid-cols-1 gap-4">
@@ -288,9 +287,9 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                 className="space-y-8"
               >
                 <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-serif font-bold">วงจรการเรียนรู้ (Learning Loop)</h3>
+                  <h3 className="text-2xl font-serif font-bold">α╕ºα╕çα╕êα╕úα╕üα╕▓α╕úα╣Çα╕úα╕╡α╕óα╕Öα╕úα╕╣α╣ë (Learning Loop)</h3>
                   <div className="px-4 py-2 bg-white border border-zinc-200 rounded-full text-xs font-mono text-zinc-500 shadow-sm">
-                    รอการตรวจสอบ: {submissions.filter(s => s.status === 'analyzed').length}
+                    α╕úα╕¡α╕üα╕▓α╕úα╕òα╕úα╕ºα╕êα╕¬α╕¡α╕Ü: {submissions.filter(s => s.status === 'analyzed').length}
                   </div>
                 </div>
 
@@ -319,7 +318,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                               className="text-[10px] font-mono font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-lg shadow-orange-500/20"
                             >
                               <AlertTriangle className="w-3 h-3" />
-                              โต้แย้งด่วน
+                              α╣éα╕òα╣ëα╣üα╕óα╣ëα╕çα╕öα╣êα╕ºα╕Ö
                             </motion.span>
                           )}
                         </div>
@@ -339,11 +338,11 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                           {sub.disputed && (
                             <div className="flex flex-col gap-1">
                               <span className="text-xs font-bold text-orange-600">
-                                ผู้ใช้ยืนยันว่าเป็น: {sub.disputeType === 'claim_human' ? 'มนุษย์' : 'AI'}
+                                α╕£α╕╣α╣ëα╣âα╕èα╣ëα╕óα╕╖α╕Öα╕óα╕▒α╕Öα╕ºα╣êα╕▓α╣Çα╕¢α╣çα╕Ö: {sub.disputeType === 'claim_human' ? 'α╕íα╕Öα╕╕α╕⌐α╕óα╣î' : 'AI'}
                               </span>
                               {sub.disputeReason && (
                                 <span className="text-[10px] text-orange-500 italic">
-                                  เหตุผล: {sub.disputeReason}
+                                  α╣Çα╕½α╕òα╕╕α╕£α╕Ñ: {sub.disputeReason}
                                 </span>
                               )}
                             </div>
@@ -357,14 +356,14 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                           className="px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-600 hover:text-white transition-all flex items-center gap-2"
                         >
                           <AlertTriangle className="w-4 h-4" />
-                          ยืนยันว่าทุจริต
+                          α╕óα╕╖α╕Öα╕óα╕▒α╕Öα╕ºα╣êα╕▓α╕ùα╕╕α╕êα╕úα╕┤α╕ò
                         </button>
                         <button 
                           onClick={() => handleCorrect(sub, 'not_cheating')}
                           className="px-4 py-2 bg-green-50 text-green-600 border border-green-100 rounded-xl text-xs font-bold hover:bg-green-600 hover:text-white transition-all flex items-center gap-2"
                         >
                           <CheckCircle2 className="w-4 h-4" />
-                          ยืนยันว่าปกติ
+                          α╕óα╕╖α╕Öα╕óα╕▒α╕Öα╕ºα╣êα╕▓α╕¢α╕üα╕òα╕┤
                         </button>
                       </div>
                     </div>
@@ -372,7 +371,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                 </div>
 
                 <div className="space-y-4">
-                  <h4 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">การอัปเดตความจำล่าสุด</h4>
+                  <h4 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">α╕üα╕▓α╕úα╕¡α╕▒α╕¢α╣Çα╕öα╕òα╕äα╕ºα╕▓α╕íα╕êα╕│α╕Ñα╣êα╕▓α╕¬α╕╕α╕ö</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {patterns.slice(0, 6).map(p => (
                       <div key={p.id} className="p-4 bg-white border border-zinc-100 rounded-2xl space-y-2 shadow-sm">
@@ -381,7 +380,7 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                             "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
                             p.label === 'cheating' ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"
                           )}>
-                            {p.label === 'cheating' ? 'ทุจริต' : 'ปกติ'}
+                            {p.label === 'cheating' ? 'α╕ùα╕╕α╕êα╕úα╕┤α╕ò' : 'α╕¢α╕üα╕òα╕┤'}
                           </span>
                           <span className="text-[10px] font-mono text-zinc-400">{new Date(p.timestamp).toLocaleDateString()}</span>
                         </div>
@@ -390,6 +389,90 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
                     ))}
                   </div>
                 </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'api-status' && (
+              <motion.div 
+                key="api-status"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="space-y-8"
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-2xl font-serif font-bold">สถานะ API</h3>
+                  <button 
+                    onClick={checkApiHealth}
+                    disabled={isRefreshingApi}
+                    className="px-6 py-2 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+                  >
+                    <RefreshCw className={cn("w-4 h-4", isRefreshingApi && "animate-spin")} />
+                    {isRefreshingApi ? 'กำลังตรวจสอบ...' : 'ตรวจสอบใหม่'}
+                  </button>
+                </div>
+
+                {!apiHealth ? (
+                  <div className="flex items-center justify-center p-12">
+                    <RefreshCw className="w-8 h-8 text-zinc-400 animate-spin" />
+                  </div>
+                ) : (
+                  <>
+                    <div className={cn(
+                      "p-6 rounded-2xl border flex items-center gap-4",
+                      apiHealth.status === 'healthy' ? "bg-green-50 border-green-200" :
+                      apiHealth.status === 'degraded' ? "bg-yellow-50 border-yellow-200" :
+                      "bg-red-50 border-red-200"
+                    )}>
+                      <div className={cn(
+                        "w-4 h-4 rounded-full",
+                        apiHealth.status === 'healthy' ? "bg-green-500" :
+                        apiHealth.status === 'degraded' ? "bg-yellow-500" :
+                        "bg-red-500"
+                      )} />
+                      <div>
+                        <span className="text-lg font-bold">
+                          {apiHealth.status === 'healthy' ? 'ปกติ' :
+                           apiHealth.status === 'degraded' ? 'มีปัญหา' : 'ไม่พร้อมใช้งาน'}
+                        </span>
+                        <span className="text-sm text-zinc-500 ml-2">
+                          {apiHealth.workingModels}/{apiHealth.totalModels} models ทำงาน
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {Object.entries(apiHealth.models).map(([modelName, modelStatus]) => (
+                        <div 
+                          key={modelName}
+                          className={cn(
+                            "p-4 rounded-2xl border",
+                            modelStatus.status === 'ok' ? "bg-white border-zinc-200" : "bg-red-50 border-red-200"
+                          )}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-mono text-sm font-bold">{modelName}</span>
+                            <span className={cn(
+                              "text-[10px] font-bold px-2 py-0.5 rounded",
+                              modelStatus.status === 'ok' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                            )}>
+                              {modelStatus.status === 'ok' ? 'OK' : 'ERROR'}
+                            </span>
+                          </div>
+                          {modelStatus.latency !== undefined && (
+                            <div className="text-xs text-zinc-500">
+                              Latency: {modelStatus.latency}ms
+                            </div>
+                          )}
+                          {modelStatus.errorDetails && (
+                            <div className="text-xs text-red-500 mt-1">
+                              {modelStatus.errorDetails}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -444,12 +527,12 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
               )}
               {submission.disputed && (
                 <span className="text-[10px] font-mono font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-md shadow-orange-500/20">
-                  โต้แย้ง
+                  α╣éα╕òα╣ëα╣üα╕óα╣ëα╕ç
                 </span>
               )}
               <div className="h-1 w-1 bg-zinc-200 rounded-full" />
               <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">
-                {submission.status === 'pending' ? 'กำลังรอ' : submission.status === 'analyzed' ? 'วิเคราะห์แล้ว' : 'แก้ไขแล้ว'}
+                {submission.status === 'pending' ? 'α╕üα╕│α╕Ñα╕▒α╕çα╕úα╕¡' : submission.status === 'analyzed' ? 'α╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣îα╣üα╕Ñα╣ëα╕º' : 'α╣üα╕üα╣ëα╣äα╕éα╣üα╕Ñα╣ëα╕º'}
               </span>
             </div>
             <p className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">{new Date(submission.timestamp).toLocaleString()}</p>
@@ -460,7 +543,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
           {result && (
             <div className="flex gap-4">
               <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">ความมั่นใจ</div>
+                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">α╕äα╕ºα╕▓α╕íα╕íα╕▒α╣êα╕Öα╣âα╕ê</div>
                 <div className={cn(
                   "text-lg font-bold",
                   (result.confidenceScore || 0) < 60 ? "text-amber-500" : "text-blue-600"
@@ -470,7 +553,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
               </div>
               <div className="w-px h-8 bg-zinc-100" />
               <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">AI / ทุจริต</div>
+                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">AI / α╕ùα╕╕α╕êα╕úα╕┤α╕ò</div>
                 <div className="text-lg font-bold text-red-500">{result.cheatingScore}%</div>
               </div>
             </div>
@@ -503,7 +586,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
           >
             <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div className="space-y-4">
-                <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">เนื้อหาที่ส่งตรวจสอบ</h5>
+                <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">α╣Çα╕Öα╕╖α╣ëα╕¡α╕½α╕▓α╕ùα╕╡α╣êα╕¬α╣êα╕çα╕òα╕úα╕ºα╕êα╕¬α╕¡α╕Ü</h5>
                 <div className="p-6 bg-white border border-zinc-100 rounded-2xl text-sm text-zinc-600 leading-relaxed font-sans shadow-inner">
                   {submission.text}
                 </div>
@@ -513,7 +596,7 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
                 {result ? (
                   <>
                     <div className="space-y-4">
-                      <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">เหตุผลจากการวิเคราะห์</h5>
+                      <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">α╣Çα╕½α╕òα╕╕α╕£α╕Ñα╕êα╕▓α╕üα╕üα╕▓α╕úα╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣î</h5>
                       <div className="prose prose-zinc prose-sm max-w-none text-zinc-600">
                         <Markdown>{result.reasoning}</Markdown>
                       </div>
@@ -522,15 +605,15 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
                     {result.analysisDetails && (
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 border-t border-zinc-100">
                         <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">ไวยากรณ์</span>
+                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">α╣äα╕ºα╕óα╕▓α╕üα╕úα╕ôα╣î</span>
                           <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.grammar}</p>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">ความลึกซึ้ง</span>
+                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">α╕äα╕ºα╕▓α╕íα╕Ñα╕╢α╕üα╕ïα╕╢α╣ëα╕ç</span>
                           <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.depth}</p>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">การใช้คำ</span>
+                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">α╕üα╕▓α╕úα╣âα╕èα╣ëα╕äα╕│</span>
                           <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.wordUsage}</p>
                         </div>
                       </div>
@@ -539,115 +622,11 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-zinc-400 gap-4">
                     <RefreshCw className="w-8 h-8 animate-spin" />
-                    <span className="text-xs font-mono uppercase tracking-widest">กำลังวิเคราะห์...</span>
+                    <span className="text-xs font-mono uppercase tracking-widest">α╕üα╕│α╕Ñα╕▒α╕çα╕ºα╕┤α╣Çα╕äα╕úα╕▓α╕░α╕½α╣î...</span>
                   </div>
                 )}
               </div>
             </div>
-          </motion.div>
-        )}
-
-        {activeTab === 'api-status' && (
-          <motion.div 
-            key="api-status"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="space-y-8"
-          >
-            {/* API Status Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <h3 className="text-2xl font-serif font-bold">สถานะการใช้งาน API</h3>
-                <button 
-                  onClick={checkApiHealth}
-                  disabled={isRefreshingApi}
-                  className="p-2 hover:bg-zinc-100 rounded-xl transition-all disabled:opacity-50"
-                >
-                  <RefreshCw className={cn("w-5 h-5 text-zinc-500", isRefreshingApi && "animate-spin")} />
-                </button>
-              </div>
-              <div className={cn(
-                "px-4 py-2 rounded-full text-sm font-bold",
-                apiHealth?.status === 'healthy' && "bg-green-100 text-green-700",
-                apiHealth?.status === 'degraded' && "bg-orange-100 text-orange-700",
-                apiHealth?.status === 'unhealthy' && "bg-red-100 text-red-700",
-                apiHealth?.status === 'loading' && "bg-zinc-100 text-zinc-500"
-              )}>
-                {apiHealth?.status === 'loading' && 'กำลังโหลด...'}
-                {apiHealth?.status === 'healthy' && `พร้อมใช้งาน (${apiHealth.workingModels}/${apiHealth.totalModels})`}
-                {apiHealth?.status === 'degraded' && `บางส่วนไม่พร้อม (${apiHealth.workingModels}/${apiHealth.totalModels})`}
-                {apiHealth?.status === 'unhealthy' && 'ไม่พร้อมใช้งาน'}
-              </div>
-            </div>
-
-            {/* Working APIs */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-bold text-zinc-700 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-green-500" />
-                API ที่พร้อมใช้งาน ({apiHealth?.workingModels || 0})
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {apiHealth && Object.entries(apiHealth.models)
-                  .filter(([_, m]) => m.status === 'ok')
-                  .map(([name, m]) => (
-                    <div key={name} className="p-6 bg-white border border-green-200 rounded-2xl shadow-sm">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="font-bold text-zinc-800 truncate">{name}</span>
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-green-600">
-                        <span className="font-mono">✓ พร้อมใช้งาน</span>
-                        {m.latency && (
-                          <>
-                            <span className="text-zinc-300">•</span>
-                            <span className="font-mono">{m.latency}ms</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                {(!apiHealth || Object.entries(apiHealth.models).filter(([_, m]) => m.status === 'ok').length === 0) && (
-                  <div className="col-span-full p-8 text-center text-zinc-400 text-sm">
-                    ไม่มี API ที่พร้อมใช้งาน
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Failed APIs with Error Logs */}
-            {apiHealth && Object.entries(apiHealth.models).filter(([_, m]) => m.status === 'error').length > 0 && (
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold text-red-700 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4" />
-                  API ที่ไม่สามารถใช้งานได้ ({Object.entries(apiHealth.models).filter(([_, m]) => m.status === 'error').length})
-                </h4>
-                <div className="space-y-4">
-                  {Object.entries(apiHealth.models)
-                    .filter(([_, m]) => m.status === 'error')
-                    .map(([name, m]) => (
-                      <div key={name} className="p-6 bg-red-50 border border-red-200 rounded-2xl">
-                        <div className="flex items-center justify-between mb-4">
-                          <span className="font-bold text-red-800">{name}</span>
-                          <div className="w-2 h-2 bg-red-500 rounded-full" />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="text-xs text-red-600">
-                            <span className="font-bold">Error:</span> {m.message}
-                          </div>
-                          {m.errorDetails && (
-                            <div className="mt-3 p-3 bg-white border border-red-100 rounded-xl">
-                              <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider mb-2">Log Details:</div>
-                              <pre className="text-xs text-red-700 whitespace-pre-wrap break-all font-mono max-h-40 overflow-y-auto">
-                                {m.errorDetails}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -656,3 +635,4 @@ function SubmissionCard({ submission, result, onDelete }: { submission: Submissi
 }
 
 export default AdminDashboard;
+
