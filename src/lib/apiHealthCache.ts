@@ -1,16 +1,3 @@
-import { 
-  collection, 
-  addDoc, 
-  getDocs, 
-  query, 
-  orderBy, 
-  limit, 
-  doc,
-  setDoc,
-  deleteDoc
-} from 'firebase/firestore';
-import { db } from '../firebase';
-
 export interface ApiHealthData {
   timestamp: string;
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -25,36 +12,22 @@ export interface ApiHealthData {
   }>;
 }
 
-const CACHE_COLLECTION = 'apiHealthCache';
+const CACHE_KEY = 'apiHealthCache';
 const CACHE_VALID_DURATION = 2 * 60 * 1000; // 2 minutes in milliseconds
 
 /**
- * Save API health data to Firebase cache
+ * Save API health data to localStorage cache
  */
 export async function saveApiHealthToCache(healthData: ApiHealthData): Promise<void> {
   try {
-    // Create a document with timestamp as ID for easy querying
     const timestamp = new Date().toISOString();
-    const docId = `health_${Date.now()}`;
-    
-    await setDoc(doc(db, CACHE_COLLECTION, docId), {
+    const cacheData = {
       ...healthData,
       timestamp,
       cachedAt: timestamp
-    });
-
-    // Clean up old cache entries (keep only the latest 10)
-    const q = query(collection(db, CACHE_COLLECTION), orderBy('timestamp', 'desc'), limit(20));
-    const snapshot = await getDocs(q);
-    const docs = snapshot.docs;
+    };
     
-    // Delete entries beyond the latest 10
-    if (docs.length > 10) {
-      for (let i = 10; i < docs.length; i++) {
-        await deleteDoc(doc(db, CACHE_COLLECTION, docs[i].id));
-      }
-    }
-
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
     console.log('API health data saved to cache');
   } catch (error) {
     console.error('Error saving API health to cache:', error);
@@ -62,20 +35,18 @@ export async function saveApiHealthToCache(healthData: ApiHealthData): Promise<v
 }
 
 /**
- * Get API health data from Firebase cache
+ * Get API health data from localStorage cache
  */
 export async function getApiHealthFromCache(): Promise<ApiHealthData | null> {
   try {
-    const q = query(collection(db, CACHE_COLLECTION), orderBy('timestamp', 'desc'), limit(1));
-    const snapshot = await getDocs(q);
+    const cached = localStorage.getItem(CACHE_KEY);
     
-    if (snapshot.empty) {
+    if (!cached) {
       console.log('No cached API health data found');
       return null;
     }
 
-    const doc = snapshot.docs[0];
-    const data = doc.data() as ApiHealthData;
+    const data = JSON.parse(cached) as ApiHealthData;
 
     // Check if cache is still valid (within 2 minutes)
     if (isCacheValid(data.timestamp)) {
@@ -83,6 +54,7 @@ export async function getApiHealthFromCache(): Promise<ApiHealthData | null> {
       return data;
     } else {
       console.log('Cached API health data is stale');
+      localStorage.removeItem(CACHE_KEY);
       return null;
     }
   } catch (error) {
