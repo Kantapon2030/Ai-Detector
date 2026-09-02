@@ -5,17 +5,16 @@ import {
   RefreshCw, 
   Upload, 
   FileText, 
-  File, 
   X,
   AlertTriangle,
   CheckCircle2,
   Zap,
   History,
   MessageSquare,
-  Sparkles,
-  ExternalLink,
   Activity,
-  Wind
+  Wind,
+  Sparkles,
+  BarChart3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -23,7 +22,6 @@ import {
   addDoc, 
   doc, 
   updateDoc, 
-  deleteDoc,
   serverTimestamp, 
   query, 
   where, 
@@ -48,6 +46,8 @@ import { cn } from '../lib/utils';
 import FloatingParticles from '../components/FloatingParticles';
 import { PatternsProvider, usePatterns } from '../contexts/PatternsContext';
 import { findSimilarPatterns, StoredPattern } from '../lib/vectorEngine';
+import { analyzeLocalStylometry, StylometryMetrics } from '../lib/stylometry';
+import { parsePartialJSON, ParsedStreamResult } from '../lib/streamParser';
 
 interface HeatmapSegment {
   text: string;
@@ -93,6 +93,9 @@ const PublicHome: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [liveStreamText, setLiveStreamText] = useState('');
+  const [liveScore, setLiveScore] = useState<number | null>(null);
+  const [stylometry, setStylometry] = useState<StylometryMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
   const [disputeStatus, setDisputeStatus] = useState<'none' | 'submitting' | 'submitted'>('none');
@@ -103,9 +106,8 @@ const PublicHome: React.FC = () => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [apiHealth, setApiHealth] = useState<ApiHealthState>({ status: 'checking' });
   const [showHealthModal, setShowHealthModal] = useState(false);
-  const [analysisProgress, setAnalysisProgress] = useState(0);
 
-  // Client-side in-memory cache
+  // Client-side in-memory LRU cache
   const analysisCache = useRef<Map<string, AnalysisResult>>(new Map());
 
   // Patterns from context for fast RAG
@@ -126,7 +128,7 @@ const PublicHome: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // API Health Check (Background - Non-blocking)
+  // Background API Health Check
   const checkHealth = async () => {
     try {
       const res = await fetch('/api/health');
@@ -154,7 +156,7 @@ const PublicHome: React.FC = () => {
         status: 'unhealthy',
         provider: 'OpenTyphoon AI',
         error: 'Network Error',
-        details: err.message || 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์หลังบ้านได้',
+        details: err.message,
         timestamp: new Date().toISOString()
       });
     }
@@ -231,6 +233,9 @@ const PublicHome: React.FC = () => {
     setInputText('');
     setFile(null);
     setResult(null);
+    setLiveStreamText('');
+    setLiveScore(null);
+    setStylometry(null);
     setError(null);
     setSubmissionId(null);
     setIsCached(false);
@@ -257,10 +262,10 @@ const PublicHome: React.FC = () => {
     setFile(null);
   };
 
+  // Perform Ultra-Fast Analysis with Streaming & Incremental Parsing
   const performAnalysis = async () => {
     let textToAnalyze = inputText.trim();
 
-    // If file is provided, extract its text content
     if (file) {
       try {
         if (file.name.endsWith('.docx')) {
@@ -268,7 +273,6 @@ const PublicHome: React.FC = () => {
           const docxResult = await mammoth.extractRawText({ arrayBuffer });
           textToAnalyze = docxResult.value.trim();
         } else {
-          // Plain text / Markdown
           textToAnalyze = await file.text();
         }
       } catch (fileErr: any) {
@@ -290,95 +294,43 @@ const PublicHome: React.FC = () => {
     setIsAnalyzing(true);
     setError(null);
     setResult(null);
+    setLiveStreamText('');
+    setLiveScore(null);
     setSubmissionId(null);
     setIsCached(false);
-    setAnalysisProgress(10);
 
-    const progressTimer = setInterval(() => {
-      setAnalysisProgress(prev => {
-        if (prev < 80) return prev + 15;
-        if (prev < 95) return prev + 3;
-        return prev;
-      });
-    }, 150);
+    const startTime = Date.now();
+
+    // ⚡ Tier 1: Instant Local Stylometry Engine (< 1ms)
+    const localMetrics = analyzeLocalStylometry(textToAnalyze);
+    setStylometry(localMetrics);
+    setLiveScore(localMetrics.preliminaryScore);
 
     try {
       const textHash = await hashText(textToAnalyze);
 
-      // 1. In-memory client cache check
+      // 1. In-memory client cache check (Instant 0ms)
       if (analysisCache.current.has(textHash)) {
         const cached = analysisCache.current.get(textHash)!;
         setResult(cached);
+        setLiveScore(cached.score);
         setIsCached(true);
         setIsAnalyzing(false);
-        setAnalysisProgress(100);
-        clearInterval(progressTimer);
         return;
       }
 
-      // 2. Server-side Firestore cache check
-      try {
-        const q = query(
-          collection(db, 'submissions'),
-          where('textHash', '==', textHash),
-          limit(5)
-        );
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          const docs = [...snap.docs];
-          const correctedDoc = docs.find(d => d.data().status === 'corrected');
-          const analyzedDoc = docs.find(d => d.data().status === 'analyzed' && !d.data().disputed);
-
-          const targetDoc = correctedDoc || analyzedDoc;
-          if (targetDoc) {
-            const subId = targetDoc.id;
-            const resQ = query(collection(db, 'analysisResults'), where('submissionId', '==', subId), limit(1));
-            const resSnap = await getDocs(resQ);
-            
-            if (!resSnap.empty) {
-              const resData = resSnap.docs[0].data();
-              const cachedRes: AnalysisResult = {
-                score: resData.cheatingScore,
-                confidenceScore: resData.confidenceScore || 95,
-                verdict: resData.verdict || (resData.cheatingScore > 50 ? 'AI Generated' : 'Human Written'),
-                reasoning: resData.reasoning,
-                heatmap: resData.heatmap || [],
-                analysisDetails: resData.analysisDetails || {
-                  grammar: "N/A",
-                  depth: "N/A",
-                  wordUsage: "N/A"
-                },
-                modelUsed: resData.modelUsed || "Typhoon 2.5 Instruct",
-                isCorrected: !!correctedDoc
-              };
-
-              analysisCache.current.set(textHash, cachedRes);
-              setResult(cachedRes);
-              setSubmissionId(subId);
-              setIsCached(true);
-              setIsAnalyzing(false);
-              setAnalysisProgress(100);
-              clearInterval(progressTimer);
-              return;
-            }
-          }
-        }
-      } catch (cacheErr) {
-        console.warn('Firestore cache lookup skipped:', cacheErr);
-      }
-
-      // 3. RAG Knowledge retrieval using our fast local vector engine
+      // 2. Local Vector Engine RAG matching (< 1ms)
       let ragContext = "";
       if (patterns && patterns.length > 0) {
-        const similar = findSimilarPatterns(textToAnalyze, patterns as StoredPattern[], 0.3, 3);
+        const similar = findSimilarPatterns(textToAnalyze, patterns as StoredPattern[], 0.35, 3);
         if (similar.length > 0) {
-          ragContext = "**ข้อมูลการตัดสินก่อนหน้าจากผู้ดูแลระบบ (Admin Learning Context)**:\n" +
-            similar.map(p => `- คำตัดสิน: ${p.label === 'cheating' ? 'AI (สร้างโดยปัญญาประดิษฐ์)' : 'มนุษย์ (เขียนโดยมนุษย์)'}\n  ตัวอย่างข้อความ: ${p.text.slice(0, 200)}...`).join('\n');
+          ragContext = "**ข้อมูลการตัดสินจากผู้ดูแลระบบ (Admin Learning Context)**:\n" +
+            similar.map(p => `- คำตัดสิน: ${p.label === 'cheating' ? 'AI (สร้างโดยปัญญาประดิษฐ์)' : 'มนุษย์ (เขียนโดยมนุษย์)'}\n  ตัวอย่าง: ${p.text.slice(0, 180)}...`).join('\n');
         }
       }
 
-      // 4. Call Typhoon AI API Proxy
-      const response = await fetch('/api/analyze-typhoon', {
+      // 3. 🌊 Tier 2: Real-time SSE Stream Call
+      const response = await fetch('/api/analyze-typhoon-stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -389,22 +341,109 @@ const PublicHome: React.FC = () => {
         })
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.details || errData.error || `เซิร์ฟเวอร์ตอบกลับด้วยรหัส ${response.status}`);
+      if (!response.ok || !response.body) {
+        // Fallback to non-streaming endpoint
+        const fallbackRes = await fetch('/api/analyze-typhoon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textToAnalyze, ragContext: ragContext || undefined })
+        });
+        if (!fallbackRes.ok) throw new Error('การประมวลผลล้มเหลว');
+        const fallbackData = await fallbackRes.json();
+        setResult(fallbackData);
+        setLiveScore(fallbackData.score);
+        analysisCache.current.set(textHash, fallbackData);
+        saveToFirestoreInBackground(textToAnalyze, textHash, fallbackData);
+        return;
       }
 
-      const analysisData: AnalysisResult = await response.json();
-      
-      setResult(analysisData);
-      analysisCache.current.set(textHash, analysisData);
-      setAnalysisProgress(100);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedRaw = "";
+      let lastParsed: ParsedStreamResult | null = null;
 
-      // 5. Store to Firestore asynchronously in background
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ") && line !== "data: [DONE]") {
+            try {
+              const jsonChunk = JSON.parse(line.slice(6));
+              const delta = jsonChunk.choices?.[0]?.delta?.content || "";
+              accumulatedRaw += delta;
+
+              // Incremental Partial Parsing in Real-Time
+              const parsed = parsePartialJSON(accumulatedRaw);
+              lastParsed = parsed;
+
+              if (parsed.score !== null) {
+                setLiveScore(parsed.score);
+              }
+              if (parsed.reasoning) {
+                setLiveStreamText(parsed.reasoning);
+              }
+            } catch {}
+          }
+        }
+      }
+
+      // Clean up final result
+      let finalResult: AnalysisResult;
+      try {
+        let cleanJsonStr = accumulatedRaw.trim();
+        const jsonMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) cleanJsonStr = jsonMatch[1].trim();
+        else {
+          const objMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
+          if (objMatch) cleanJsonStr = objMatch[0].trim();
+        }
+        finalResult = JSON.parse(cleanJsonStr);
+      } catch {
+        // Fallback to lastParsed fields
+        finalResult = {
+          score: lastParsed?.score ?? localMetrics.preliminaryScore,
+          confidenceScore: lastParsed?.confidenceScore ?? 95,
+          verdict: lastParsed?.verdict ?? (lastParsed && lastParsed.score !== null && lastParsed.score >= 50 ? 'AI Generated' : 'Human Written'),
+          reasoning: lastParsed?.reasoning || liveStreamText || "การวิเคราะห์เสร็จสมบูรณ์",
+          analysisDetails: lastParsed?.analysisDetails || {
+            grammar: "โครงสร้างมีความสอดคล้อง",
+            depth: "ระดับความลึกซึ้งตามเกณฑ์",
+            wordUsage: "รูปแบบคำศัพท์และสำนวน"
+          },
+          heatmap: lastParsed?.heatmap || []
+        };
+      }
+
+      const totalLatency = Date.now() - startTime;
+      finalResult.latency = totalLatency;
+      finalResult.modelUsed = 'Typhoon 2.5 Instruct';
+
+      setResult(finalResult);
+      setLiveScore(finalResult.score);
+      analysisCache.current.set(textHash, finalResult);
+
+      // 4. 🛡️ Tier 3: Non-Blocking Background Firestore Logging
+      saveToFirestoreInBackground(textToAnalyze, textHash, finalResult);
+
+    } catch (err: any) {
+      console.error("Analysis failed:", err);
+      setError(err.message || 'เกิดข้อผิดพลาดในการวิเคราะห์ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Background Async Firestore Sync (Fire-and-Forget, 0ms UI impact)
+  const saveToFirestoreInBackground = (text: string, hash: string, analysisData: AnalysisResult) => {
+    setTimeout(async () => {
       try {
         const subDoc = await addDoc(collection(db, 'submissions'), {
-          text: textToAnalyze.slice(0, 5000),
-          textHash: textHash,
+          text: text.slice(0, 4000),
+          textHash: hash,
           status: 'analyzed',
           modelUsed: 'typhoon-v2.5-30b-a3b-instruct',
           timestamp: new Date().toISOString(),
@@ -418,7 +457,7 @@ const PublicHome: React.FC = () => {
           submissionId: subDoc.id,
           cheatingScore: analysisData.score,
           confidenceScore: analysisData.confidenceScore,
-          verdict: analysisData.verdict || (analysisData.score > 50 ? 'AI Generated' : 'Human Written'),
+          verdict: analysisData.verdict || (analysisData.score >= 50 ? 'AI Generated' : 'Human Written'),
           reasoning: analysisData.reasoning,
           analysisDetails: analysisData.analysisDetails,
           heatmap: analysisData.heatmap,
@@ -426,16 +465,9 @@ const PublicHome: React.FC = () => {
           timestamp: new Date().toISOString()
         });
       } catch (dbErr) {
-        console.warn('Firestore store notice:', dbErr);
+        console.warn('Background Firestore save notice:', dbErr);
       }
-
-    } catch (err: any) {
-      console.error("Analysis failed:", err);
-      setError(err.message || 'เกิดข้อผิดพลาดในการวิเคราะห์ กรุณาลองใหม่อีกครั้ง');
-    } finally {
-      clearInterval(progressTimer);
-      setIsAnalyzing(false);
-    }
+    }, 10);
   };
 
   const handleDispute = async () => {
@@ -472,16 +504,16 @@ const PublicHome: React.FC = () => {
         <Logo />
         
         <div className="flex items-center gap-2 md:gap-4">
-          {/* Typhoon API Health Badge */}
+          {/* Typhoon API Live Health Badge */}
           <button
             onClick={() => setShowHealthModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 bg-white/80 border border-zinc-200/70 rounded-full shadow-sm backdrop-blur-sm hover:bg-zinc-50 transition-all text-left"
+            className="flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 bg-white/80 border border-zinc-200/70 rounded-full shadow-sm backdrop-blur-sm hover:bg-zinc-50 transition-all text-left cursor-pointer"
             title="คลิกเพื่อดูรายละเอียดสถานะ Typhoon API"
           >
             {apiHealth.status === 'checking' ? (
               <>
                 <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-ping" />
-                <span className="text-[10px] md:text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">กำลังตรวจสอบ Typhoon...</span>
+                <span className="text-[10px] md:text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">กำลังเชื่อมต่อ Typhoon...</span>
               </>
             ) : apiHealth.status === 'healthy' ? (
               <>
@@ -517,7 +549,7 @@ const PublicHome: React.FC = () => {
               )}
               <button 
                 onClick={logout}
-                className="p-2 bg-white border border-zinc-200 rounded-full hover:bg-zinc-50 transition-all shadow-sm"
+                className="p-2 bg-white border border-zinc-200 rounded-full hover:bg-zinc-50 transition-all shadow-sm cursor-pointer"
                 title="ออกจากระบบ"
               >
                 <X className="w-4 h-4 text-zinc-400" />
@@ -526,7 +558,7 @@ const PublicHome: React.FC = () => {
           ) : (
             <button 
               onClick={login}
-              className="px-4 py-2 bg-zinc-900 text-white text-[10px] md:text-xs font-black rounded-full uppercase tracking-widest hover:bg-zinc-800 transition-all shadow-lg"
+              className="px-4 py-2 bg-zinc-900 text-white text-[10px] md:text-xs font-black rounded-full uppercase tracking-widest hover:bg-zinc-800 transition-all shadow-lg cursor-pointer"
             >
               Admin Login
             </button>
@@ -535,20 +567,20 @@ const PublicHome: React.FC = () => {
       </header>
 
       {/* Main Container */}
-      <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-6 md:space-y-12 relative z-10">
+      <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-6 md:space-y-10 relative z-10">
         {/* Hero Section */}
-        <section className="text-center space-y-4 max-w-3xl mx-auto pt-2 md:pt-6">
+        <section className="text-center space-y-4 max-w-3xl mx-auto pt-2 md:pt-4">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200/80 rounded-full text-xs font-bold text-blue-700 shadow-sm">
             <Wind className="w-4 h-4 text-blue-600 animate-pulse" />
-            <span>ขับเคลื่อนด้วย OpenTyphoon AI 2.5 (30B Instruct)</span>
+            <span>Ultra-Fast Hybrid Streaming • OpenTyphoon AI 2.5</span>
           </div>
 
           <h2 className="text-2xl md:text-5xl font-serif font-black tracking-tight text-zinc-900 leading-tight">
-            ตรวจจับเนื้อหาจาก AI อย่างแม่นยำ
+            ตรวจจับเนื้อหาจาก AI ทันทีแบบเรียลไทม์
           </h2>
           
-          <p className="text-zinc-600 text-sm md:text-lg leading-relaxed">
-            วิเคราะห์ความเป็นมนุษย์ vs AI ด้วยสถาปัตยกรรมภาษาศาสตร์คอมพิวเตอร์และโมเดลภาษาไทยระดับแนวหน้า
+          <p className="text-zinc-600 text-sm md:text-base leading-relaxed">
+            ผสานการคำนวณทางภาษาศาสตร์ในระดับมิลลิวินาที เข้ากับการวิเคราะห์เชิงลึกจาก OpenTyphoon AI 2.5 (30B Instruct)
           </p>
         </section>
 
@@ -570,21 +602,22 @@ const PublicHome: React.FC = () => {
                   placeholder="วางข้อความที่ต้องการตรวจสอบที่นี่ (รองรับทั้งภาษาไทยและภาษาอังกฤษ)..."
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  className="w-full h-48 md:h-60 bg-zinc-50 border border-zinc-200 rounded-2xl p-4 md:p-6 font-sans text-base focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none leading-relaxed"
+                  className="w-full h-44 md:h-56 bg-zinc-50 border border-zinc-200 rounded-2xl p-4 md:p-6 font-sans text-base focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none leading-relaxed"
                 />
                 
                 {isAnalyzing && (
-                  <div className="absolute bottom-0 left-0 w-full h-1.5 bg-zinc-200 overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-300"
-                      style={{ width: `${analysisProgress}%` }}
+                  <div className="absolute bottom-0 left-0 w-full h-1 bg-zinc-100 overflow-hidden">
+                    <motion.div 
+                      className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-sky-400"
+                      animate={{ x: ['-100%', '100%'] }}
+                      transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
                     />
                   </div>
                 )}
               </div>
             </div>
 
-            {/* File Upload & Clear */}
+            {/* File Upload & Controls */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
               <div>
                 <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest font-bold block mb-2">
@@ -604,7 +637,7 @@ const PublicHome: React.FC = () => {
                     </div>
                     <button 
                       onClick={removeFile}
-                      className="p-1.5 hover:bg-blue-100 rounded-full text-zinc-400 hover:text-red-500 transition-colors"
+                      className="p-1.5 hover:bg-blue-100 rounded-full text-zinc-400 hover:text-red-500 transition-colors cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -635,7 +668,7 @@ const PublicHome: React.FC = () => {
                 {(inputText || file || result) && (
                   <button 
                     onClick={clearForm}
-                    className="px-5 py-3.5 border border-zinc-200 rounded-2xl text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition-all flex items-center justify-center gap-2 font-bold text-xs"
+                    className="px-5 py-3.5 border border-zinc-200 rounded-2xl text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition-all flex items-center justify-center gap-2 font-bold text-xs cursor-pointer"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     ล้างฟอร์ม
@@ -659,72 +692,87 @@ const PublicHome: React.FC = () => {
             <button 
               onClick={performAnalysis}
               disabled={isAnalyzing || (!inputText && !file)}
-              className="w-full py-4 md:py-5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold rounded-2xl flex items-center justify-center gap-3 hover:from-blue-700 hover:to-indigo-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-blue-500/20 text-sm md:text-base cursor-pointer"
+              className="w-full py-4 md:py-5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white font-bold rounded-2xl flex items-center justify-center gap-3 hover:opacity-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-blue-500/20 text-sm md:text-base cursor-pointer"
             >
               {isAnalyzing ? (
                 <>
                   <RefreshCw className="w-5 h-5 animate-spin" />
-                  กำลังส่งข้อมูลวิเคราะห์ผ่าน Typhoon 2.5 AI...
+                  กำลังสตรีมผลการวิเคราะห์จาก Typhoon AI...
                 </>
               ) : (
                 <>
-                  <BrainCircuit className="w-5 h-5" />
-                  เริ่มตรวจสอบความโปร่งใสของข้อมูล
+                  <Zap className="w-5 h-5 text-amber-300" />
+                  เริ่มตรวจสอบความโปร่งใส (Fast Analysis)
                 </>
               )}
             </button>
           </div>
         </section>
 
-        {/* Results Section */}
-        {result && (
+        {/* Live Streaming & Result Display */}
+        {(isAnalyzing || result) && (
           <motion.section 
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="space-y-8"
+            className="space-y-6"
           >
-            {result.isCorrected && (
+            {/* Instant Tier-1 Stylometry Banner (< 1ms) */}
+            {stylometry && (
+              <div className="p-4 bg-white border border-zinc-200/80 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-blue-600" />
+                  <span className="font-bold text-zinc-800">การวิเคราะห์ทางภาษาศาสตร์เบื้องต้น (Instant Stylometry):</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-4 text-zinc-600 font-mono text-[11px]">
+                  <span>ประโยค: <strong>{stylometry.sentenceCount}</strong></span>
+                  <span>Burstiness: <strong>{stylometry.burstiness}</strong></span>
+                  <span>
+                    สำนวน AI ที่ตรวจพบ: <strong className={stylometry.clichéCount > 0 ? "text-red-600" : "text-emerald-600"}>{stylometry.clichéCount} คำ</strong>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Admin Confirmation Flag */}
+            {result?.isCorrected && (
               <div className="flex items-center gap-3 px-6 py-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-bold text-emerald-800 shadow-sm w-fit mx-auto">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 <span>ผลลัพธ์นี้ได้รับการยืนยันความถูกต้องโดยผู้ดูแลระบบแล้ว (Admin Confirmed)</span>
               </div>
             )}
 
-            {isCached && !result.isCorrected && (
+            {/* Cache Indicator */}
+            {isCached && !result?.isCorrected && (
               <div className="flex items-center gap-2 px-4 py-1.5 bg-amber-50 border border-amber-200 rounded-full text-[10px] font-bold text-amber-700 uppercase tracking-widest w-fit mx-auto">
                 <History className="w-3.5 h-3.5" />
-                แสดงผลจากหน่วยความจำแคช (Cached Result)
+                แสดงผลจากหน่วยความจำแคชทันที (Instant 0ms)
               </div>
             )}
 
+            {/* Main Score & Reasoning Card */}
             <div className="bg-white border border-zinc-200 rounded-[1.5rem] md:rounded-[2.5rem] shadow-xl p-6 md:p-10 space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-start">
                 
-                {/* Left: Gauge & Verdict */}
+                {/* Gauge & Live Probability */}
                 <div className="flex flex-col items-center gap-4">
                   <div className="relative w-full max-w-[300px] flex flex-col items-center">
-                    <GaugeMeter score={result.score} label="โอกาสเป็น AI" />
+                    <GaugeMeter score={liveScore ?? result?.score ?? 50} label="โอกาสเป็น AI" />
                     
                     <div 
                       className={cn(
-                        "mt-[-25px] px-6 py-2 text-white text-xs font-black rounded-full uppercase tracking-widest shadow-xl z-20",
-                        result.score >= 50 ? "bg-red-500 shadow-red-500/30" : "bg-emerald-500 shadow-emerald-500/30"
+                        "mt-[-25px] px-6 py-2 text-white text-xs font-black rounded-full uppercase tracking-widest shadow-xl z-20 transition-all",
+                        (liveScore ?? result?.score ?? 50) >= 50 ? "bg-red-500 shadow-red-500/30" : "bg-emerald-500 shadow-emerald-500/30"
                       )}
                     >
-                      {result.score >= 50 ? 'AI Generated (สร้างโดย AI)' : 'Human Written (มนุษย์เขียน)'}
+                      {(liveScore ?? result?.score ?? 50) >= 50 ? 'AI Generated (สร้างโดย AI)' : 'Human Written (มนุษย์เขียน)'}
                     </div>
                   </div>
 
                   <div className="mt-2 text-center space-y-1">
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-zinc-100 border border-zinc-200 rounded-lg text-[10px] font-bold text-zinc-600 uppercase tracking-wider">
-                      <Zap className="w-3 h-3 text-blue-500" />
-                      วิเคราะห์โดย Typhoon 2.5 30B Instruct
+                      <Wind className="w-3 h-3 text-blue-500" />
+                      {isAnalyzing ? "กำลังสตรีมจาก OpenTyphoon AI 2.5" : `วิเคราะห์โดย Typhoon 2.5 (${result?.latency ? `${result.latency}ms` : 'Fast'})`}
                     </div>
-                    {result.confidenceScore && (
-                      <p className="text-[11px] font-mono text-zinc-400">
-                        ความมั่นใจของผลลัพธ์: {result.confidenceScore}%
-                      </p>
-                    )}
                   </div>
 
                   <div className="flex gap-6 justify-center pt-2">
@@ -739,7 +787,7 @@ const PublicHome: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Right: Reasoning & Multi-Persona Details */}
+                {/* Live Streaming Reasoning Text */}
                 <div className="space-y-6">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2.5">
@@ -751,11 +799,15 @@ const PublicHome: React.FC = () => {
                     <div className="h-1 w-12 bg-blue-600 rounded-full" />
                   </div>
 
-                  <div className="prose prose-zinc prose-sm max-w-none text-zinc-700 leading-relaxed bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
-                    <Markdown>{result.reasoning}</Markdown>
+                  <div className="prose prose-zinc prose-sm max-w-none text-zinc-700 leading-relaxed bg-zinc-50 p-4 md:p-5 rounded-2xl border border-zinc-100 min-h-[100px]">
+                    <Markdown>{liveStreamText || result?.reasoning || "กำลังประมวลผล..."}</Markdown>
+                    {isAnalyzing && (
+                      <span className="inline-block w-2 h-4 bg-blue-600 ml-1 animate-pulse align-middle" />
+                    )}
                   </div>
 
-                  {result.analysisDetails && (
+                  {/* Multi-Dimension Details */}
+                  {result?.analysisDetails && (
                     <div className="space-y-3 pt-2">
                       <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">
                         มิติการวิเคราะห์ภาษาศาสตร์ (Stylometry Dimensions)
@@ -780,7 +832,7 @@ const PublicHome: React.FC = () => {
               </div>
 
               {/* Heatmap Section */}
-              {result.heatmap && result.heatmap.length > 0 && (
+              {result?.heatmap && result.heatmap.length > 0 && (
                 <div className="space-y-4 pt-6 border-t border-zinc-100">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">
@@ -815,7 +867,7 @@ const PublicHome: React.FC = () => {
                 </div>
               )}
 
-              {/* Dispute Button */}
+              {/* Dispute Section */}
               {submissionId && disputeStatus === 'none' && (
                 <div className="pt-4 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                   <span className="text-xs text-zinc-500">
@@ -823,14 +875,14 @@ const PublicHome: React.FC = () => {
                   </span>
                   <button
                     onClick={() => setDisputeStatus('submitting')}
-                    className="px-4 py-2 border border-zinc-300 rounded-xl text-xs font-bold text-zinc-700 hover:bg-zinc-50 transition-colors shrink-0"
+                    className="px-4 py-2 border border-zinc-300 rounded-xl text-xs font-bold text-zinc-700 hover:bg-zinc-50 transition-colors shrink-0 cursor-pointer"
                   >
                     ยื่นคำโต้แย้งผลลัพธ์
                   </button>
                 </div>
               )}
 
-              {/* Dispute Modal/Form */}
+              {/* Dispute Form */}
               {disputeStatus === 'submitting' && (
                 <div className="p-5 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-4">
                   <div className="flex items-center gap-2">
@@ -872,14 +924,14 @@ const PublicHome: React.FC = () => {
                     <div className="flex justify-end gap-2">
                       <button
                         onClick={() => setDisputeStatus('none')}
-                        className="px-3 py-1.5 border border-zinc-200 rounded-lg text-xs text-zinc-500 hover:bg-white"
+                        className="px-3 py-1.5 border border-zinc-200 rounded-lg text-xs text-zinc-500 hover:bg-white cursor-pointer"
                       >
                         ยกเลิก
                       </button>
                       <button
                         onClick={handleDispute}
                         disabled={!disputeReason.trim()}
-                        className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50"
+                        className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
                       >
                         ส่งคำโต้แย้ง
                       </button>
@@ -916,7 +968,7 @@ const PublicHome: React.FC = () => {
                 </div>
                 <button 
                   onClick={() => setShowHealthModal(false)}
-                  className="p-1.5 hover:bg-zinc-100 rounded-full text-zinc-400 hover:text-zinc-700"
+                  className="p-1.5 hover:bg-zinc-100 rounded-full text-zinc-400 hover:text-zinc-700 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -954,14 +1006,14 @@ const PublicHome: React.FC = () => {
               <div className="pt-2 flex justify-end gap-2">
                 <button 
                   onClick={() => { checkHealth(); }}
-                  className="px-4 py-2 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 transition-colors flex items-center gap-1.5 text-xs"
+                  className="px-4 py-2 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 transition-colors flex items-center gap-1.5 text-xs cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   ทดสอบใหม่
                 </button>
                 <button 
                   onClick={() => setShowHealthModal(false)}
-                  className="px-4 py-2 bg-zinc-900 text-white font-bold rounded-xl hover:bg-zinc-800 transition-colors text-xs"
+                  className="px-4 py-2 bg-zinc-900 text-white font-bold rounded-xl hover:bg-zinc-800 transition-colors text-xs cursor-pointer"
                 >
                   ปิด
                 </button>

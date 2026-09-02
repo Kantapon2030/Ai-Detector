@@ -18,66 +18,65 @@ const TYPHOON_API_URL = 'https://api.opentyphoon.ai/v1/chat/completions';
 const TYPHOON_MODELS_URL = 'https://api.opentyphoon.ai/v1/models';
 const DEFAULT_MODEL = 'typhoon-v2.5-30b-a3b-instruct';
 
-const SYSTEM_DETECTION_PROMPT = `คุณคือระบบตรวจจับและวิเคราะห์เนื้อหาที่สร้างโดยปัญญาประดิษฐ์ (AI-Generated Text Detection Specialist) ที่มีความเชี่ยวชาญระดับสูงในด้านภาษาศาสตร์คอมพิวเตอร์และรูปแบบภาษาไทย-อังกฤษ
+function getAdaptiveTokenBudget(textLength: number): number {
+  if (textLength < 400) return 500;
+  if (textLength < 1200) return 750;
+  if (textLength < 2500) return 1000;
+  return 1400;
+}
 
-จงวิเคราะห์ข้อความที่ได้รับอย่างละเอียดรอบคอบ โดยพิจารณาจากมิติทางภาษาศาสตร์ดังต่อไปนี้:
-1. **Perplexity & Burstiness (ความแปรผันของความยาวและจังหวะประโยค)**:
-   - มนุษย์: มีจังหวะวรรคตอนที่ไม่สม่ำเสมอ ประโยคสั้นยาวปะปน มีอารมณ์ความรู้สึก มีคำสร้อยหรือสำนวนเฉพาะตัว
-   - AI: โครงสร้างประโยคสมมาตรสม่ำเสมอ (Monotonous cadence), ความยาวประโยคเกาะกลุ่มกัน, มีระเบียบแบบแผนเกินไป
-2. **Syntactic & Discourse Patterns (การใช้คำเชื่อมและสำนวนสำเร็จรูปของ AI)**:
-   - สัญญาณ AI ในภาษาไทย: มักใช้คำเชื่อมและโครงสร้างซ้ำๆ เช่น "นอกจากนี้...", "สิ่งสำคัญคือ...", "โดยสรุปแล้ว...", "ในยุคปัจจุบัน...", "มีบทบาทสำคัญอย่างยิ่ง", "ช่วยเสริมสร้างและพัฒนา...", "ไม่เพียงแต่...แต่ยัง...", การจัดหมวดหมู่ 3-4 ข้ออย่างสมบูรณ์แบบ
-3. **Depth, Tone & Semantic Predictability (ความเป็นธรรมชาติและเนื้อหา)**:
-   - มนุษย์: มีความคิดเห็นเชิงลึก มีการใช้ตรรกะแบบไม่เป็นเส้นตรง มีคำแสลง มีจุดบกพร่องเล็กๆ ทางไวยากรณ์ตามธรรมชาติ
-   - AI: มีความเป็นกลางสูงมาก หลีกเลี่ยงความขัดแย้ง พยายามครอบคลุมทุกมุมมอง ขาดความเฉพาะเจาะจงทางประสบการณ์
+const SYSTEM_DETECTION_PROMPT = `คุณคือระบบตรวจจับและวิเคราะห์เนื้อหาที่สร้างโดยปัญญาประดิษฐ์ (AI-Generated Text Detection Specialist) ที่มีความเชี่ยวชาญด้านภาษาศาสตร์คอมพิวเตอร์ภาษาไทยและสากล
 
-**ข้อกำหนดผลลัพธ์**:
-- ตอบกลับเป็น JSON เท่านั้น (Strict JSON) ห้ามมีข้อความอื่นนอก JSON
-รูปแบบ JSON:
+เกณฑ์การวิเคราะห์:
+1. Perplexity & Burstiness: ความแปรผันของความยาวและจังหวะประโยค (มนุษย์หลากหลาย/มีอารมณ์, AI สมมาตร/สม่ำเสมอเกินไป)
+2. Discourse Clichés: คำเชื่อมและสำนวนสำเร็จรูปของ AI (เช่น "ในยุคปัจจุบัน", "นอกจากนี้", "สิ่งสำคัญคือ", "มีบทบาทสำคัญอย่างยิ่ง", "โดยสรุปแล้ว")
+3. Semantic Depth: ความเป็นธรรมชาติ ประสบการณ์เฉพาะบุคคล เทียบกับความเป็นกลางที่ผิวเผิน
+
+ตอบเป็น JSON เท่านั้น:
 {
-  "score": <0-100 ระดับความน่าจะเป็นของ AI, 100 คือ AI ชัวร์, 0 คือ มนุษย์แท้>,
-  "confidenceScore": <0-100 ระดับความมั่นใจของระบบในการวิเคราะห์>,
-  "verdict": "<'AI Generated' หรือ 'Human Written' หรือ 'Mixed / Uncertain'>",
-  "reasoning": "<สรุปเหตุผลการวิเคราะห์อย่างชัดเจน 3-4 บรรทัด ระบุจุดสังเกตเฉพาะเจาะจง>",
+  "score": <0-100 ระดับความน่าจะเป็นของ AI>,
+  "confidenceScore": <0-100>,
+  "verdict": "<'AI Generated'|'Human Written'|'Mixed / Uncertain'>",
+  "reasoning": "<สรุปเหตุผลการวิเคราะห์กระชับ 2-3 บรรทัด>",
   "analysisDetails": {
-    "grammar": "<วิเคราะห์โครงสร้างไวยากรณ์และความสม่ำเสมอ>",
-    "depth": "<วิเคราะห์ความลึกซึ้ง ความเป็นธรรมชาติ และอารมณ์ของเนื้อหา>",
-    "wordUsage": "<วิเคราะห์คำเชื่อม คำศัพท์ และสำนวนสำเร็จรูปที่พบ>"
+    "grammar": "<โครงสร้างไวยากรณ์>",
+    "depth": "<ความลึกซึ้งและอารมณ์>",
+    "wordUsage": "<คำเชื่อมและสำนวนสำเร็จรูป>"
   },
   "heatmap": [
     {
       "text": "<ข้อความท่อน/ประโยคย่อย>",
-      "score": <0-100 ระดับความเป็น AI ของท่อนนี้>
+      "score": <0-100>
     }
   ]
 }`;
 
-// API Proxy for Typhoon AI
-app.post('/api/analyze-typhoon', async (req: any, res: any) => {
-  const startTime = Date.now();
+// SSE Streaming Route
+app.post('/api/analyze-typhoon-stream', async (req: any, res: any) => {
+  const apiKey = process.env.TYPHOON_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'TYPHOON_API_KEY is not configured on the server' });
+  }
+
+  const { text, ragContext, model = DEFAULT_MODEL } = req.body;
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ error: 'Text content is required' });
+  }
+
+  let userContent = `วิเคราะห์ข้อความต่อไปนี้:\n"""${text}"""`;
+  if (ragContext) {
+    userContent += `\n\n${ragContext}`;
+  }
+
+  const tokenBudget = getAdaptiveTokenBudget(text.length);
+
   try {
-    const apiKey = process.env.TYPHOON_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ 
-        error: 'TYPHOON_API_KEY is not configured on the server',
-        details: 'กรุณาตั้งค่า TYPHOON_API_KEY ใน Environment Variables ของเซิร์ฟเวอร์'
-      });
-    }
-
-    const { text, ragContext, model = DEFAULT_MODEL } = req.body;
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Text content is required' });
-    }
-
-    let userContent = `วิเคราะห์ข้อความต่อไปนี้อย่างละเอียด:\n"""${text}"""`;
-    if (ragContext) {
-      userContent += `\n\n${ragContext}`;
-    }
-
     const typhoonResponse = await fetch(TYPHOON_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${apiKey}`,
+        'Connection': 'keep-alive'
       },
       body: JSON.stringify({
         model,
@@ -85,17 +84,81 @@ app.post('/api/analyze-typhoon', async (req: any, res: any) => {
           { role: 'system', content: SYSTEM_DETECTION_PROMPT },
           { role: 'user', content: userContent }
         ],
-        max_tokens: 2048,
+        max_tokens: tokenBudget,
+        temperature: 0.1,
+        stream: true
+      })
+    });
+
+    if (!typhoonResponse.ok) {
+      const errorText = await typhoonResponse.text();
+      return res.status(typhoonResponse.status).json({ error: errorText });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    if (!typhoonResponse.body) return res.status(500).end();
+
+    const reader = typhoonResponse.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(decoder.decode(value, { stream: true }));
+    }
+
+    res.end();
+  } catch (err: any) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else res.end();
+  }
+});
+
+// Non-streaming fallback
+app.post('/api/analyze-typhoon', async (req: any, res: any) => {
+  const startTime = Date.now();
+  try {
+    const apiKey = process.env.TYPHOON_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'TYPHOON_API_KEY is not configured on the server' });
+    }
+
+    const { text, ragContext, model = DEFAULT_MODEL } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Text content is required' });
+    }
+
+    let userContent = `วิเคราะห์ข้อความต่อไปนี้:\n"""${text}"""`;
+    if (ragContext) {
+      userContent += `\n\n${ragContext}`;
+    }
+
+    const tokenBudget = getAdaptiveTokenBudget(text.length);
+
+    const typhoonResponse = await fetch(TYPHOON_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Connection': 'keep-alive'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: SYSTEM_DETECTION_PROMPT },
+          { role: 'user', content: userContent }
+        ],
+        max_tokens: tokenBudget,
         temperature: 0.1
       })
     });
 
     if (!typhoonResponse.ok) {
       const errorText = await typhoonResponse.text();
-      return res.status(typhoonResponse.status).json({
-        error: `Typhoon API error (Status ${typhoonResponse.status})`,
-        details: errorText
-      });
+      return res.status(typhoonResponse.status).json({ error: errorText });
     }
 
     const responseData = await typhoonResponse.json();
@@ -118,10 +181,7 @@ app.post('/api/analyze-typhoon', async (req: any, res: any) => {
 
     res.json(parsedResult);
   } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Internal server error during analysis',
-      message: error.message 
-    });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -142,7 +202,7 @@ app.get('/api/health', async (req: any, res: any) => {
   try {
     const response = await fetch(TYPHOON_MODELS_URL, {
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${apiKey}` }
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Connection': 'keep-alive' }
     });
 
     const latency = Date.now() - startTime;
