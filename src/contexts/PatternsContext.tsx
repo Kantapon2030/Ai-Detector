@@ -4,7 +4,8 @@ interface Pattern {
   id: string;
   text: string;
   label: string;
-  embedding: number[];
+  embedding?: number[];
+  tfVector?: Record<string, number>;
   similarity?: number;
 }
 

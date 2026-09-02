@@ -1,280 +1,183 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import express from 'express';
 import dotenv from 'dotenv';
+import dns from 'node:dns';
+
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (e) {
+  // Ignore
+}
 
 dotenv.config();
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-// Debug middleware
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  next();
-});
+const TYPHOON_API_URL = 'https://api.opentyphoon.ai/v1/chat/completions';
+const TYPHOON_MODELS_URL = 'https://api.opentyphoon.ai/v1/models';
+const DEFAULT_MODEL = 'typhoon-v2.5-30b-a3b-instruct';
 
-// API Proxy for ThaiLLM
-app.post('/api/analyze-thaillm', async (req: any, res: any) => {
-  console.log('=== ThaiLLM API Endpoint Hit ===');
+const SYSTEM_DETECTION_PROMPT = `คุณคือระบบตรวจจับและวิเคราะห์เนื้อหาที่สร้างโดยปัญญาประดิษฐ์ (AI-Generated Text Detection Specialist) ที่มีความเชี่ยวชาญระดับสูงในด้านภาษาศาสตร์คอมพิวเตอร์และรูปแบบภาษาไทย-อังกฤษ
+
+จงวิเคราะห์ข้อความที่ได้รับอย่างละเอียดรอบคอบ โดยพิจารณาจากมิติทางภาษาศาสตร์ดังต่อไปนี้:
+1. **Perplexity & Burstiness (ความแปรผันของความยาวและจังหวะประโยค)**:
+   - มนุษย์: มีจังหวะวรรคตอนที่ไม่สม่ำเสมอ ประโยคสั้นยาวปะปน มีอารมณ์ความรู้สึก มีคำสร้อยหรือสำนวนเฉพาะตัว
+   - AI: โครงสร้างประโยคสมมาตรสม่ำเสมอ (Monotonous cadence), ความยาวประโยคเกาะกลุ่มกัน, มีระเบียบแบบแผนเกินไป
+2. **Syntactic & Discourse Patterns (การใช้คำเชื่อมและสำนวนสำเร็จรูปของ AI)**:
+   - สัญญาณ AI ในภาษาไทย: มักใช้คำเชื่อมและโครงสร้างซ้ำๆ เช่น "นอกจากนี้...", "สิ่งสำคัญคือ...", "โดยสรุปแล้ว...", "ในยุคปัจจุบัน...", "มีบทบาทสำคัญอย่างยิ่ง", "ช่วยเสริมสร้างและพัฒนา...", "ไม่เพียงแต่...แต่ยัง...", การจัดหมวดหมู่ 3-4 ข้ออย่างสมบูรณ์แบบ
+3. **Depth, Tone & Semantic Predictability (ความเป็นธรรมชาติและเนื้อหา)**:
+   - มนุษย์: มีความคิดเห็นเชิงลึก มีการใช้ตรรกะแบบไม่เป็นเส้นตรง มีคำแสลง มีจุดบกพร่องเล็กๆ ทางไวยากรณ์ตามธรรมชาติ
+   - AI: มีความเป็นกลางสูงมาก หลีกเลี่ยงความขัดแย้ง พยายามครอบคลุมทุกมุมมอง ขาดความเฉพาะเจาะจงทางประสบการณ์
+
+**ข้อกำหนดผลลัพธ์**:
+- ตอบกลับเป็น JSON เท่านั้น (Strict JSON) ห้ามมีข้อความอื่นนอก JSON
+รูปแบบ JSON:
+{
+  "score": <0-100 ระดับความน่าจะเป็นของ AI, 100 คือ AI ชัวร์, 0 คือ มนุษย์แท้>,
+  "confidenceScore": <0-100 ระดับความมั่นใจของระบบในการวิเคราะห์>,
+  "verdict": "<'AI Generated' หรือ 'Human Written' หรือ 'Mixed / Uncertain'>",
+  "reasoning": "<สรุปเหตุผลการวิเคราะห์อย่างชัดเจน 3-4 บรรทัด ระบุจุดสังเกตเฉพาะเจาะจง>",
+  "analysisDetails": {
+    "grammar": "<วิเคราะห์โครงสร้างไวยากรณ์และความสม่ำเสมอ>",
+    "depth": "<วิเคราะห์ความลึกซึ้ง ความเป็นธรรมชาติ และอารมณ์ของเนื้อหา>",
+    "wordUsage": "<วิเคราะห์คำเชื่อม คำศัพท์ และสำนวนสำเร็จรูปที่พบ>"
+  },
+  "heatmap": [
+    {
+      "text": "<ข้อความท่อน/ประโยคย่อย>",
+      "score": <0-100 ระดับความเป็น AI ของท่อนนี้>
+    }
+  ]
+}`;
+
+// API Proxy for Typhoon AI
+app.post('/api/analyze-typhoon', async (req: any, res: any) => {
+  const startTime = Date.now();
   try {
-    const apiKey = process.env.THAILLM_API_KEY;
-    console.log('API Key exists:', !!apiKey);
-    
+    const apiKey = process.env.TYPHOON_API_KEY;
     if (!apiKey) {
-      console.error('ERROR: THAILLM_API_KEY is not configured');
-      return res.status(500).json({ error: 'THAILLM_API_KEY is not configured on the server' });
+      return res.status(500).json({ 
+        error: 'TYPHOON_API_KEY is not configured on the server',
+        details: 'กรุณาตั้งค่า TYPHOON_API_KEY ใน Environment Variables ของเซิร์ฟเวอร์'
+      });
     }
 
-    console.log('Sending request to ThaiLLM API...');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    const { text, ragContext, model = DEFAULT_MODEL } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Text content is required' });
+    }
 
-    const response = await fetch('https://thaillm.or.th/api/pathumma/v1/chat/completions', {
+    let userContent = `วิเคราะห์ข้อความต่อไปนี้อย่างละเอียด:\n"""${text}"""`;
+    if (ragContext) {
+      userContent += `\n\n${ragContext}`;
+    }
+
+    const typhoonResponse = await fetch(TYPHOON_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': apiKey
+        'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: SYSTEM_DETECTION_PROMPT },
+          { role: 'user', content: userContent }
+        ],
+        max_tokens: 2048,
+        temperature: 0.1
+      })
     });
 
-    const responseText = await response.text();
-    console.log('ThaiLLM Response Status:', response.status);
-    console.log('ThaiLLM Response (first 300 chars):', responseText.substring(0, 300));
-
-    if (!response.ok) {
-      console.error('ThaiLLM API error - Full response:', responseText);
-      return res.status(response.status).json({ error: responseText });
+    if (!typhoonResponse.ok) {
+      const errorText = await typhoonResponse.text();
+      return res.status(typhoonResponse.status).json({
+        error: `Typhoon API error (Status ${typhoonResponse.status})`,
+        details: errorText
+      });
     }
 
-    // Parse the response as JSON first
-    let apiResponse;
-    try {
-      apiResponse = JSON.parse(responseText);
-      console.log('Parsed API response structure:', Object.keys(apiResponse));
-    } catch (e) {
-      console.error('Failed to parse API response as JSON:', e);
-      console.error('Response text (first 500 chars):', responseText.substring(0, 500));
-      return res.status(502).json({ error: 'Invalid JSON response from ThaiLLM' });
-    }
+    const responseData = await typhoonResponse.json();
+    const rawContent = responseData.choices?.[0]?.message?.content || '';
 
-    // Validate API response structure
-    if (!apiResponse.choices) {
-      console.error('No choices field in API response');
-      console.error('API response keys:', Object.keys(apiResponse));
-      console.error('Full API response:', JSON.stringify(apiResponse, null, 2).substring(0, 1000));
-      return res.status(502).json({ error: 'No choices field in ThaiLLM response' });
-    }
-
-    if (!apiResponse.choices[0]) {
-      console.error('Empty choices array');
-      return res.status(502).json({ error: 'Empty choices array in ThaiLLM response' });
-    }
-
-    if (!apiResponse.choices[0].message) {
-      console.error('No message field in choices[0]');
-      console.error('choices[0] keys:', Object.keys(apiResponse.choices[0]));
-      return res.status(502).json({ error: 'No message field in ThaiLLM response' });
-    }
-
-    // Extract content from the API response
-    let contentText = apiResponse.choices[0].message.content;
-    if (!contentText) {
-      console.error('No content in message');
-      return res.status(502).json({ error: 'No content in ThaiLLM message' });
-    }
-    console.log('Extracted content from API response, length:', contentText.length);
-
-    // Extract JSON from markdown code blocks in the content
-    let jsonStr = contentText;
-    const jsonMatch = contentText.match(/```json\s*([\s\S]*?)\s*```/);
+    let jsonStr = rawContent.trim();
+    const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       jsonStr = jsonMatch[1].trim();
-      console.log('Extracted JSON from markdown block, length:', jsonStr.length);
     } else {
-      console.log('No markdown JSON block found, trying to find raw JSON');
-      const jsonObjMatch = contentText.match(/\{[\s\S]*\}/);
-      if (jsonObjMatch) {
-        jsonStr = jsonObjMatch[0].trim();
-        console.log('Found raw JSON object, length:', jsonStr.length);
-      } else {
-        console.error('No JSON found in content');
-        return res.status(502).json({ error: 'No JSON found in ThaiLLM response content' });
+      const objMatch = rawContent.match(/\{[\s\S]*\}/);
+      if (objMatch) {
+        jsonStr = objMatch[0].trim();
       }
     }
 
-    // Log the JSON before parsing
-    console.log('JSON to parse (first 500 chars):', jsonStr.substring(0, 500));
-    console.log('JSON to parse (last 200 chars):', jsonStr.substring(jsonStr.length - 200));
+    const parsedResult = JSON.parse(jsonStr);
+    parsedResult.modelUsed = model;
+    parsedResult.latency = Date.now() - startTime;
 
-    let data;
-    try {
-      data = JSON.parse(jsonStr);
-      console.log('Successfully parsed JSON');
-      console.log('Parsed data has keys:', Object.keys(data));
-    } catch (parseError: any) {
-      console.error('Failed to parse JSON:', parseError.message);
-      console.error('JSON content around error:', jsonStr.substring(Math.max(0, parseError.index - 50), parseError.index + 50));
-      return res.status(502).json({ error: 'Failed to parse JSON from ThaiLLM: ' + parseError.message });
-    }
-
-    // Return in format that frontend expects: { choices: [{ message: { content: ... } }] }
-    // Frontend does: data.choices[0].message.content.replace(/```json\n?|```/g, '').trim()
-    const responseToClient = {
-      choices: [
-        {
-          message: {
-            content: JSON.stringify(data)
-          }
-        }
-      ]
-    };
-    
-    console.log('Sending response to client with format:', JSON.stringify(responseToClient).substring(0, 200));
-    res.json(responseToClient);
+    res.json(parsedResult);
   } catch (error: any) {
-    console.error('Proxy error:', error);
-    res.status(500).json({ error: 'Internal server error: ' + error.message });
+    res.status(500).json({ 
+      error: 'Internal server error during analysis',
+      message: error.message 
+    });
   }
 });
 
-// Health check - test all API models with latency tracking
+// Live Health Check
 app.get('/api/health', async (req: any, res: any) => {
-  const results: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string; avgLatency?: number; errorType?: '503' | '429' | '502' | 'other' }> = {};
-  
-  console.log('=== Starting API Health Check ===');
-  
-  // Test Gemini models
-  const geminiModels = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3-flash-preview',
-    'gemini-3.1-flash-live-preview'
-  ];
-  
-  for (const model of geminiModels) {
-    const startTime = Date.now();
-    console.log(`Testing Gemini model: ${model}`);
-    try {
-      // Use a simple test prompt
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'test' }] }],
-          generationConfig: { maxOutputTokens: 1 }
-        })
+  const startTime = Date.now();
+  const apiKey = process.env.TYPHOON_API_KEY;
+
+  if (!apiKey) {
+    return res.status(500).json({
+      status: 'unhealthy',
+      provider: 'OpenTyphoon AI',
+      model: DEFAULT_MODEL,
+      error: 'TYPHOON_API_KEY is not configured'
+    });
+  }
+
+  try {
+    const response = await fetch(TYPHOON_MODELS_URL, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    const latency = Date.now() - startTime;
+    if (response.ok) {
+      const data = await response.json();
+      return res.json({
+        status: 'healthy',
+        provider: 'OpenTyphoon AI',
+        model: DEFAULT_MODEL,
+        latency,
+        availableModels: Array.isArray(data) ? data.map((m: any) => m.id) : [DEFAULT_MODEL],
+        timestamp: new Date().toISOString()
       });
-      
-      const latency = Date.now() - startTime;
-      if (response.ok) {
-        console.log(`✓ ${model} - OK (${latency}ms)`);
-        results[model] = { status: 'ok', latency };
-      } else {
-        const errorText = await response.text();
-        const status = response.status;
-        let errorType: '503' | '429' | '502' | 'other' = 'other';
-        if (status === 503) errorType = '503';
-        else if (status === 429) errorType = '429';
-        else if (status === 502) errorType = '502';
-        
-        console.error(`✗ ${model} - Error: Status ${status}`, errorText.substring(0, 200));
-        results[model] = { status: 'error', message: `Status ${status}`, errorDetails: errorText.substring(0, 500), errorType };
-      }
-    } catch (error: any) {
-      console.error(`✗ ${model} - Exception:`, error.message);
-      results[model] = { status: 'error', message: error.message, errorDetails: error.stack };
-    }
-  }
-  
-  // Test ThaiLLM
-  const thaillmModel = 'thaillm-playground';
-  const apiKey = process.env.THAILLM_API_KEY;
-  console.log(`Testing ThaiLLM model: ${thaillmModel}`);
-  if (apiKey) {
-    const startTime = Date.now();
-    try {
-      const response = await fetch('https://thaillm.or.th/api/pathumma/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': apiKey
-        },
-        body: JSON.stringify({
-          model: '/model',
-          messages: [{ role: 'user', content: 'test' }],
-          max_tokens: 1
-        })
+    } else {
+      return res.status(response.status).json({
+        status: 'unhealthy',
+        provider: 'OpenTyphoon AI',
+        model: DEFAULT_MODEL,
+        latency,
+        error: `HTTP ${response.status}`,
+        timestamp: new Date().toISOString()
       });
-      
-      const latency = Date.now() - startTime;
-      if (response.ok) {
-        console.log(`✓ ${thaillmModel} - OK (${latency}ms)`);
-        results[thaillmModel] = { status: 'ok', latency };
-      } else {
-        const errorText = await response.text();
-        const status = response.status;
-        let errorType: '503' | '429' | '502' | 'other' = 'other';
-        if (status === 503) errorType = '503';
-        else if (status === 429) errorType = '429';
-        else if (status === 502) errorType = '502';
-        
-        // Also check if response is HTML (error page)
-        if (errorText.includes('<!DOCTYPE html>') || errorText.includes('502') || errorText.includes('Bad gateway')) {
-          errorType = '502';
-        }
-        
-        console.error(`✗ ${thaillmModel} - Error: Status ${status}`, errorText.substring(0, 200));
-        results[thaillmModel] = { status: 'error', message: `Status ${status}`, errorDetails: errorText.substring(0, 500), errorType };
-      }
-    } catch (error: any) {
-      console.error(`✗ ${thaillmModel} - Exception:`, error.message);
-      results[thaillmModel] = { status: 'error', message: error.message, errorDetails: error.stack };
     }
-  } else {
-    console.error(`✗ ${thaillmModel} - API key not configured`);
-    results[thaillmModel] = { status: 'error', message: 'API key not configured', errorDetails: 'THAILLM_API_KEY environment variable is not set' };
+  } catch (err: any) {
+    return res.status(500).json({
+      status: 'unhealthy',
+      provider: 'OpenTyphoon AI',
+      model: DEFAULT_MODEL,
+      error: 'Connection failed',
+      message: err.message,
+      timestamp: new Date().toISOString()
+    });
   }
-  
-  // Summary
-  const workingModels = Object.values(results).filter(r => r.status === 'ok').length;
-  const totalModels = Object.keys(results).length;
-  console.log(`=== Health Check Summary: ${workingModels}/${totalModels} models working ===`);
-  
-  // Calculate average latency for working models
-  const workingLatencies = Object.entries(results)
-    .filter(([_, r]) => r.status === 'ok' && r.latency !== undefined)
-    .map(([_, r]) => r.latency!);
-  const avgLatency = workingLatencies.length > 0 
-    ? Math.round(workingLatencies.reduce((a, b) => a + b, 0) / workingLatencies.length)
-    : undefined;
-  
-  // Log failed models details
-  Object.entries(results).forEach(([name, result]) => {
-    if (result.status === 'error') {
-      console.error(`Failed model: ${name}`);
-      console.error(`  Message: ${result.message}`);
-      console.error(`  Details: ${result.errorDetails}`);
-    }
-  });
-  
-  let overallStatus: 'healthy' | 'degraded' | 'unhealthy';
-  if (workingModels === totalModels) {
-    overallStatus = 'healthy';
-  } else if (workingModels > 0) {
-    overallStatus = 'degraded';
-  } else {
-    overallStatus = 'unhealthy';
-  }
-  
-  res.json({
-    status: overallStatus,
-    totalModels,
-    workingModels,
-    avgLatency,
-    models: results
-  });
 });
 
-// Vercel handler
 export default function handler(req: VercelRequest, res: VercelResponse) {
   return new Promise((resolve) => {
     app(req as any, res as any);

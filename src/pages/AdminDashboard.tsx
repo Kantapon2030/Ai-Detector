@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Shield, 
   History, 
@@ -9,11 +9,9 @@ import {
   LogOut,
   Database,
   BrainCircuit,
-  ChevronRight,
-  MessageSquare,
-  User as UserIcon,
-  Bot,
-  Trash2
+  Trash2,
+  Activity,
+  Wind
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -29,10 +27,10 @@ import {
   where
 } from 'firebase/firestore';
 import { signOut, User } from 'firebase/auth';
-import { GoogleGenAI } from "@google/genai";
 import Markdown from 'react-markdown';
 import { db, auth } from '../firebase';
 import { cn } from '../lib/utils';
+import { createTermFrequencyVector } from '../lib/vectorEngine';
 
 interface Submission {
   id: string;
@@ -44,7 +42,7 @@ interface Submission {
   disputeTimestamp?: any;
   disputeType?: 'claim_human' | 'claim_ai';
   disputeReason?: string;
-  actualModelUsed?: string;
+  modelUsed?: string;
 }
 
 interface AnalysisResult {
@@ -52,6 +50,7 @@ interface AnalysisResult {
   submissionId: string;
   cheatingScore: number;
   confidenceScore?: number;
+  verdict?: string;
   reasoning: string;
   analysisDetails?: {
     grammar: string;
@@ -59,7 +58,7 @@ interface AnalysisResult {
     wordUsage: string;
   };
   heatmap?: { text: string; score: number }[];
-  similarCases: string[];
+  modelUsed?: string;
   timestamp: string;
 }
 
@@ -68,34 +67,26 @@ interface CheatingPattern {
   text: string;
   description: string;
   label: 'cheating' | 'not_cheating';
-  embedding: number[];
+  tfVector?: Record<string, number>;
   timestamp: string;
 }
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-
-async function getEmbedding(text: string) {
-  const result = await genAI.models.embedContent({
-    model: 'gemini-embedding-2-preview',
-    contents: [text],
-  });
-  if (!result.embeddings?.[0]?.values) {
-    throw new Error('No embedding returned');
-  }
-  return result.embeddings[0].values;
+interface ApiHealthInfo {
+  status: 'healthy' | 'unhealthy' | 'loading';
+  provider?: string;
+  model?: string;
+  latency?: number;
+  error?: string;
+  details?: string;
+  timestamp?: string;
 }
 
 const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
-  const [activeTab, setActiveTab] = useState<'history' | 'admin' | 'api-status'>('admin');
+  const [activeTab, setActiveTab] = useState<'admin' | 'history' | 'api-status'>('admin');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [patterns, setPatterns] = useState<CheatingPattern[]>([]);
   const [analysisResults, setAnalysisResults] = useState<Record<string, AnalysisResult>>({});
-  const [apiHealth, setApiHealth] = useState<{
-    status: 'healthy' | 'degraded' | 'unhealthy' | 'loading';
-    totalModels: number;
-    workingModels: number;
-    models: Record<string, { status: 'ok' | 'error'; message?: string; latency?: number; errorDetails?: string }>;
-  } | null>(null);
+  const [apiHealth, setApiHealth] = useState<ApiHealthInfo>({ status: 'loading' });
   const [isRefreshingApi, setIsRefreshingApi] = useState(false);
 
   useEffect(() => {
@@ -126,16 +117,36 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
     };
   }, []);
 
-  // API Health check
   const checkApiHealth = async () => {
     setIsRefreshingApi(true);
     try {
       const response = await fetch('/api/health');
       const data = await response.json();
-      setApiHealth(data);
-    } catch (error) {
-      console.error('API health check failed:', error);
-      setApiHealth({ status: 'unhealthy', totalModels: 0, workingModels: 0, models: {} });
+      if (response.ok && data.status === 'healthy') {
+        setApiHealth({
+          status: 'healthy',
+          provider: data.provider || 'OpenTyphoon AI',
+          model: data.model || 'typhoon-v2.5-30b-a3b-instruct',
+          latency: data.latency,
+          timestamp: data.timestamp
+        });
+      } else {
+        setApiHealth({
+          status: 'unhealthy',
+          provider: 'OpenTyphoon AI',
+          model: 'typhoon-v2.5-30b-a3b-instruct',
+          error: data.error || 'Connection error',
+          details: data.details || data.message,
+          timestamp: data.timestamp
+        });
+      }
+    } catch (error: any) {
+      setApiHealth({
+        status: 'unhealthy',
+        provider: 'OpenTyphoon AI',
+        error: 'Network Error',
+        details: error.message
+      });
     }
     setIsRefreshingApi(false);
   };
@@ -150,18 +161,20 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
 
   const handleCorrect = async (sub: Submission, label: 'cheating' | 'not_cheating') => {
     try {
-      const embedding = await getEmbedding(sub.text);
-      
+      const tfVector = createTermFrequencyVector(sub.text);
+
       await addDoc(collection(db, 'patterns'), {
         text: sub.text,
-        description: `ปรับปรุงการวิเคราะห์โดย ${user.email}`,
+        description: `ปรับปรุงคำตัดสินโดย ${user.email}`,
         label,
-        embedding,
+        tfVector,
         timestamp: new Date().toISOString()
       });
 
       await updateDoc(doc(db, 'submissions', sub.id), {
-        status: 'corrected'
+        status: 'corrected',
+        correctedLabel: label,
+        correctedBy: user.email
       });
 
     } catch (error) {
@@ -173,7 +186,6 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
     if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบรายการนี้?')) return;
     try {
       await deleteDoc(doc(db, 'submissions', id));
-      // Also delete analysis results
       const q = query(collection(db, 'analysisResults'), where('submissionId', '==', id));
       const snap = await getDocs(q);
       await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'analysisResults', d.id))));
@@ -182,16 +194,22 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
     }
   };
 
+  const handleDeletePattern = async (id: string) => {
+    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบ Pattern นี้?')) return;
+    try {
+      await deleteDoc(doc(db, 'patterns', id));
+    } catch (error) {
+      console.error("Delete pattern failed:", error);
+    }
+  };
+
   const handleDeleteAllSubmissions = async () => {
     if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลทั้งหมด?')) return;
     try {
       const q = query(collection(db, 'submissions'));
       const snap = await getDocs(q);
-      const subIds = snap.docs.map(d => d.id);
-      
       await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'submissions', d.id))));
-      
-      // Delete all analysis results too
+
       const resQ = query(collection(db, 'analysisResults'));
       const resSnap = await getDocs(resQ);
       await Promise.all(resSnap.docs.map(d => deleteDoc(doc(db, 'analysisResults', d.id))));
@@ -202,281 +220,265 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-zinc-900 font-sans selection:bg-blue-500/30 relative overflow-hidden">
-      {/* Grand Background Elements */}
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-blue-100/20 rounded-full blur-[120px]" />
-        <div className="absolute top-[20%] -right-[10%] w-[30%] h-[30%] bg-indigo-100/10 rounded-full blur-[100px]" />
-      </div>
-
-      <nav className="fixed left-0 top-0 h-full w-24 bg-white/60 backdrop-blur-xl border-r border-zinc-200/50 flex flex-col items-center py-10 gap-10 z-50 shadow-2xl shadow-zinc-200/50">
-        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/40 border border-blue-400/30">
+      <nav className="fixed left-0 top-0 h-full w-20 md:w-24 bg-white/70 backdrop-blur-xl border-r border-zinc-200/50 flex flex-col items-center py-8 gap-8 z-50 shadow-xl">
+        <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 border border-blue-400/30">
           <Shield className="w-6 h-6 text-white" />
         </div>
         
-        <div className="flex-1 flex flex-col gap-6">
-          <NavButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<Settings className="w-6 h-6" />} label="การตั้งค่า" />
-          <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History className="w-6 h-6" />} label="ประวัติ" />
-          <NavButton active={activeTab === 'api-status'} onClick={() => setActiveTab('api-status')} icon={<BrainCircuit className="w-6 h-6" />} label="สถานะ API" />
+        <div className="flex-1 flex flex-col gap-5">
+          <NavButton 
+            active={activeTab === 'admin'} 
+            onClick={() => setActiveTab('admin')} 
+            icon={<Settings className="w-5 h-5" />} 
+            label="จัดการผล" 
+          />
+          <NavButton 
+            active={activeTab === 'history'} 
+            onClick={() => setActiveTab('history')} 
+            icon={<History className="w-5 h-5" />} 
+            label="ประวัติ" 
+          />
+          <NavButton 
+            active={activeTab === 'api-status'} 
+            onClick={() => setActiveTab('api-status')} 
+            icon={<Activity className="w-5 h-5" />} 
+            label="สถานะ API" 
+          />
         </div>
 
-        <button onClick={handleLogout} className="p-4 text-zinc-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-2xl group">
-          <LogOut className="w-6 h-6 group-hover:-translate-x-1 transition-transform" />
+        <button 
+          onClick={handleLogout} 
+          className="p-3.5 text-zinc-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-2xl"
+          title="ออกจากระบบ"
+        >
+          <LogOut className="w-5 h-5" />
         </button>
       </nav>
 
-      <main className="pl-24 min-h-screen relative z-10">
-        <header className="h-24 border-b border-zinc-200/50 flex items-center justify-between px-12 sticky top-0 bg-white/40 backdrop-blur-xl z-40">
-          <div className="flex items-center gap-6">
-            <h2 className="text-2xl font-serif font-black text-zinc-900 tracking-tight">
-              {activeTab === 'history' && 'ประวัติการวิเคราะห์'}
-              {activeTab === 'admin' && 'การจัดการระบบ'}
-              {activeTab === 'api-status' && 'สถานะ API'}
+      <main className="pl-20 md:pl-24 min-h-screen relative z-10">
+        <header className="h-20 border-b border-zinc-200/50 flex items-center justify-between px-6 md:px-12 sticky top-0 bg-white/60 backdrop-blur-xl z-40">
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl md:text-2xl font-serif font-black text-zinc-900 tracking-tight">
+              {activeTab === 'admin' && 'การจัดการผลและ Dispute (Learning Loop)'}
+              {activeTab === 'history' && 'ประวัติการส่งข้อมูลวิเคราะห์'}
+              {activeTab === 'api-status' && 'สถานะ Typhoon AI API'}
             </h2>
-            <div className="h-1.5 w-1.5 bg-zinc-300 rounded-full" />
-            <div className="flex flex-col">
-              <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-[0.2em]">
-                ADMINISTRATOR
-              </span>
-              <span className="text-xs font-medium text-zinc-500">
-                {user.email}
-              </span>
-            </div>
           </div>
           
-          <div className="flex items-center gap-8">
-            <div className="flex items-center gap-3 px-4 py-2 bg-white/50 border border-zinc-200/50 rounded-full shadow-sm">
-              <Database className="w-4 h-4 text-blue-500" />
-              <span className="text-xs font-bold text-zinc-600">{patterns.length} รูปแบบ</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/70 border border-zinc-200 rounded-full shadow-sm text-xs font-bold text-zinc-600">
+              <Database className="w-3.5 h-3.5 text-blue-500" />
+              <span>{patterns.length} RAG Patterns</span>
             </div>
+            <a href="/" className="text-xs font-bold text-blue-600 hover:underline">
+              กลับหน้าบ้าน
+            </a>
           </div>
         </header>
 
-        <div className="p-12 max-w-6xl mx-auto space-y-12">
+        <div className="p-6 md:p-12 max-w-6xl mx-auto space-y-8">
           <AnimatePresence mode="wait">
-            {activeTab === 'history' && (
-              <motion.div 
-                key="history"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="space-y-6"
-              >
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-2xl font-serif font-bold">ประวัติการวิเคราะห์</h3>
-                  <button 
-                    onClick={handleDeleteAllSubmissions}
-                    className="px-6 py-2 bg-red-50 text-red-600 border border-red-100 rounded-full text-xs font-bold hover:bg-red-600 hover:text-white transition-all flex items-center gap-2 shadow-sm"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    ลบทั้งหมด
-                  </button>
+            {activeTab === 'admin' && (
+              <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-serif font-bold text-zinc-900">รายการคำขอตรวจสอบและข้อโต้แย้ง</h3>
+                    <p className="text-xs text-zinc-500">คลิก 'มนุษย์' หรือ 'AI' เพื่อยืนยันผลและฝึกระบบ Learning Loop</p>
+                  </div>
+                  <span className="text-xs font-mono font-bold bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-200">
+                    รอการตรวจสอบ: {submissions.filter(s => s.status === 'analyzed').length}
+                  </span>
                 </div>
-                <div className="grid grid-cols-1 gap-4">
-                  {submissions.map((sub) => (
-                    <SubmissionCard 
-                      key={sub.id} 
-                      submission={sub} 
-                      result={analysisResults[sub.id]} 
-                      onDelete={() => handleDeleteSubmission(sub.id)}
-                    />
-                  ))}
+
+                <div className="space-y-4">
+                  {submissions
+                    .filter(s => s.status === 'analyzed')
+                    .sort((a, b) => (b.disputed ? 1 : 0) - (a.disputed ? 1 : 0))
+                    .map((sub) => {
+                      const res = analysisResults[sub.id];
+                      return (
+                        <div 
+                          key={sub.id} 
+                          className={cn(
+                            "p-6 bg-white border rounded-2xl shadow-sm space-y-4 transition-all",
+                            sub.disputed ? "border-amber-300 bg-amber-50/20" : "border-zinc-200"
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-mono text-zinc-400">{new Date(sub.timestamp).toLocaleString('th-TH')}</span>
+                              {sub.disputed && (
+                                <span className="text-[10px] font-bold bg-amber-500 text-white px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  ผู้ใช้โต้แย้งผล ({sub.disputeType === 'claim_human' ? 'อ้างว่าเป็นมนุษย์' : 'อ้างว่าเป็น AI'})
+                                </span>
+                              )}
+                            </div>
+                            {res && (
+                              <span className={cn("text-xs font-bold px-2.5 py-1 rounded-lg text-white", res.cheatingScore >= 50 ? "bg-red-500" : "bg-emerald-500")}>
+                                AI Score: {res.cheatingScore}%
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-sm text-zinc-800 bg-zinc-50 p-4 rounded-xl border border-zinc-100 font-serif leading-relaxed line-clamp-3">
+                            "{sub.text}"
+                          </p>
+
+                          {sub.disputed && sub.disputeReason && (
+                            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900">
+                              <strong>เหตุผลการโต้แย้ง:</strong> {sub.disputeReason}
+                            </div>
+                          )}
+
+                          {res?.reasoning && (
+                            <div className="text-xs text-zinc-600 bg-zinc-50/70 p-3 rounded-xl">
+                              <strong>เหตุผลจาก Typhoon AI:</strong> {res.reasoning}
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleCorrect(sub, 'not_cheating')}
+                                className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 flex items-center gap-1.5 shadow-sm"
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                                ยืนยันเป็น "มนุษย์"
+                              </button>
+                              <button
+                                onClick={() => handleCorrect(sub, 'cheating')}
+                                className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-xl hover:bg-red-700 flex items-center gap-1.5 shadow-sm"
+                              >
+                                <AlertTriangle className="w-4 h-4" />
+                                ยืนยันเป็น "AI"
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteSubmission(sub.id)}
+                              className="p-2 text-zinc-400 hover:text-red-500 rounded-lg hover:bg-red-50"
+                              title="ลบรายการนี้"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                  {submissions.filter(s => s.status === 'analyzed').length === 0 && (
+                    <div className="p-12 text-center bg-white border border-zinc-200 rounded-3xl text-zinc-400 text-sm">
+                      ไม่มีรายการที่รอการตรวจสอบในขณะนี้
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
 
-            {activeTab === 'admin' && (
-              <motion.div 
-                key="admin"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="space-y-8"
-              >
+            {activeTab === 'history' && (
+              <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-serif font-bold">การจัดการระบบ (Learning Loop)</h3>
-                  <div className="px-4 py-2 bg-white border border-zinc-200 rounded-full text-xs font-mono text-zinc-500 shadow-sm">
-                    วิเคราะห์แล้ว: {submissions.filter(s => s.status === 'analyzed').length}
-                  </div>
+                  <h3 className="text-lg font-serif font-bold text-zinc-900">ประวัติการวิเคราะห์ทั้งหมด ({submissions.length})</h3>
+                  <button
+                    onClick={handleDeleteAllSubmissions}
+                    className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs font-bold hover:bg-red-600 hover:text-white transition-colors flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    ลบประวัติทั้งหมด
+                  </button>
                 </div>
 
-                <div className="space-y-6">
-                  {submissions
-                    .filter(s => s.status === 'analyzed')
-                    .sort((a, b) => (b.disputed ? 1 : 0) - (a.disputed ? 1 : 0))
-                    .map((sub) => (
-                    <div 
-                      key={sub.id} 
-                      className={cn(
-                        "p-8 bg-white border rounded-[2rem] flex flex-col md:flex-row gap-8 items-start md:items-center transition-all shadow-sm",
-                        sub.disputed ? "border-orange-200 bg-orange-50/30 ring-1 ring-orange-100" : "border-zinc-200"
-                      )}
-                    >
-                      <div className="flex-1 space-y-4">
-                        <div className="flex items-center gap-4">
-                          <span className="text-xs font-mono font-bold text-zinc-400">{new Date(sub.timestamp).toLocaleString()}</span>
-                          {sub.isAnonymous && (
-                            <span className="text-[10px] font-mono font-bold bg-zinc-100 text-zinc-500 px-2 py-0.5 rounded-full">ANONYMOUS</span>
-                          )}
-                          {sub.disputed && (
-                            <motion.span 
-                              animate={{ scale: [1, 1.05, 1] }}
-                              transition={{ repeat: Infinity, duration: 2 }}
-                              className="text-[10px] font-mono font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-lg shadow-orange-500/20"
-                            >
-                              <AlertTriangle className="w-3 h-3" />
-                              ถูกโต้แย้ง
-                            </motion.span>
-                          )}
+                <div className="space-y-3">
+                  {submissions.map((sub) => {
+                    const res = analysisResults[sub.id];
+                    return (
+                      <div key={sub.id} className="p-4 bg-white border border-zinc-200 rounded-2xl flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-zinc-800 truncate font-serif">"{sub.text}"</p>
+                          <span className="text-[10px] font-mono text-zinc-400">{new Date(sub.timestamp).toLocaleString('th-TH')}</span>
                         </div>
-                        <p className="text-base text-zinc-700 line-clamp-2 italic font-serif leading-relaxed">"{sub.text}"</p>
-                        <div className="flex items-center gap-3">
-                          <span className={cn(
-                            "text-xs font-black px-3 py-1 rounded-lg shadow-sm",
-                            analysisResults[sub.id]?.cheatingScore > 50 ? "bg-red-500 text-white" : "bg-green-500 text-white"
-                          )}>
-                            AI Score: {analysisResults[sub.id]?.cheatingScore}%
+                        {res && (
+                          <span className={cn("text-xs font-bold px-2.5 py-1 rounded-lg text-white shrink-0", res.cheatingScore >= 50 ? "bg-red-500" : "bg-emerald-500")}>
+                            {res.cheatingScore}% AI
                           </span>
-                          {sub.actualModelUsed && (
-                            <span className="text-[10px] font-mono font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded-lg border border-blue-100">
-                              Model: {sub.actualModelUsed}
-                            </span>
-                          )}
-                          {sub.disputed && (
-                            <div className="flex flex-col gap-1">
-                              <span className="text-xs font-bold text-orange-600">
-                                ประเภท: {sub.disputeType === 'claim_human' ? 'อ้างว่าเป็นคน' : 'AI'}
-                              </span>
-                              {sub.disputeReason && (
-                                <span className="text-[10px] text-orange-500 italic">
-                                  เหตุผล: {sub.disputeReason}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="flex gap-2 shrink-0">
-                        <button 
-                          onClick={() => handleCorrect(sub, 'cheating')}
-                          className="px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-600 hover:text-white transition-all flex items-center gap-2"
+                        )}
+                        <button
+                          onClick={() => handleDeleteSubmission(sub.id)}
+                          className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
                         >
-                          <AlertTriangle className="w-4 h-4" />
-                          ยืนยันว่าโกง
-                        </button>
-                        <button 
-                          onClick={() => handleCorrect(sub, 'not_cheating')}
-                          className="px-4 py-2 bg-green-50 text-green-600 border border-green-100 rounded-xl text-xs font-bold hover:bg-green-600 hover:text-white transition-all flex items-center gap-2"
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          ยืนยันว่าไม่โกง
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="space-y-4">
-                  <h4 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">รูปแบบการทุจริตที่พบ</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {patterns.slice(0, 6).map(p => (
-                      <div key={p.id} className="p-4 bg-white border border-zinc-100 rounded-2xl space-y-2 shadow-sm">
-                        <div className="flex justify-between items-start">
-                          <span className={cn(
-                            "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
-                            p.label === 'cheating' ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"
-                          )}>
-                            {p.label === 'cheating' ? 'โกง' : 'ไม่โกง'}
-                          </span>
-                          <span className="text-[10px] font-mono text-zinc-400">{new Date(p.timestamp).toLocaleDateString()}</span>
-                        </div>
-                        <p className="text-xs text-zinc-500 line-clamp-3 italic">"{p.text}"</p>
-                      </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
               </motion.div>
             )}
 
             {activeTab === 'api-status' && (
-              <motion.div 
-                key="api-status"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="space-y-8"
-              >
+              <motion.div key="api-status" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-serif font-bold">สถานะ API</h3>
-                  <button 
+                  <div className="flex items-center gap-2">
+                    <Wind className="w-5 h-5 text-blue-600" />
+                    <h3 className="text-lg font-serif font-bold text-zinc-900">สถานะ OpenTyphoon AI Service</h3>
+                  </div>
+                  <button
                     onClick={checkApiHealth}
                     disabled={isRefreshingApi}
-                    className="px-6 py-2 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-1.5"
                   >
-                    <RefreshCw className={cn("w-4 h-4", isRefreshingApi && "animate-spin")} />
-                    {isRefreshingApi ? 'กำลังตรวจสอบ...' : 'ตรวจสอบใหม่'}
+                    <RefreshCw className={cn("w-3.5 h-3.5", isRefreshingApi && "animate-spin")} />
+                    ตรวจสอบสถานะสด
                   </button>
                 </div>
 
-                {!apiHealth ? (
-                  <div className="flex items-center justify-center p-12">
-                    <RefreshCw className="w-8 h-8 text-zinc-400 animate-spin" />
-                  </div>
-                ) : (
-                  <>
-                    <div className={cn(
-                      "p-6 rounded-2xl border flex items-center gap-4",
-                      apiHealth.status === 'healthy' ? "bg-green-50 border-green-200" :
-                      apiHealth.status === 'degraded' ? "bg-yellow-50 border-yellow-200" :
-                      "bg-red-50 border-red-200"
-                    )}>
-                      <div className={cn(
-                        "w-4 h-4 rounded-full",
-                        apiHealth.status === 'healthy' ? "bg-green-500" :
-                        apiHealth.status === 'degraded' ? "bg-yellow-500" :
-                        "bg-red-500"
-                      )} />
-                      <div>
-                        <span className="text-lg font-bold">
-                          {apiHealth.status === 'healthy' ? 'ปกติ' :
-                           apiHealth.status === 'degraded' ? 'มีปัญหา' : 'ไม่พร้อมใช้งาน'}
-                        </span>
-                        <span className="text-sm text-zinc-500 ml-2">
-                          {apiHealth.workingModels}/{apiHealth.totalModels} models ทำงาน
-                        </span>
-                      </div>
+                <div className="p-6 bg-white border border-zinc-200 rounded-3xl space-y-6 shadow-sm">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                      <span className="text-xs text-zinc-500 block mb-1">สถานะ API</span>
+                      <span className={cn("text-base font-bold", apiHealth.status === 'healthy' ? "text-emerald-600" : "text-red-600")}>
+                        {apiHealth.status === 'healthy' ? '✓ พร้อมใช้งาน (Healthy)' : '✗ มีปัญหา (Unhealthy)'}
+                      </span>
                     </div>
+                    <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                      <span className="text-xs text-zinc-500 block mb-1">โมเดลที่ใช้งาน</span>
+                      <span className="text-sm font-mono font-bold text-blue-600">{apiHealth.model || 'typhoon-v2.5-30b-a3b-instruct'}</span>
+                    </div>
+                    <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                      <span className="text-xs text-zinc-500 block mb-1">ความเร็วการตอบสนอง</span>
+                      <span className="text-base font-mono font-bold text-zinc-800">{apiHealth.latency ? `${apiHealth.latency} ms` : '-'}</span>
+                    </div>
+                  </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {Object.entries(apiHealth.models).map(([modelName, modelStatus]) => (
-                        <div 
-                          key={modelName}
-                          className={cn(
-                            "p-4 rounded-2xl border",
-                            modelStatus.status === 'ok' ? "bg-white border-zinc-200" : "bg-red-50 border-red-200"
-                          )}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-mono text-sm font-bold">{modelName}</span>
-                            <span className={cn(
-                              "text-[10px] font-bold px-2 py-0.5 rounded",
-                              modelStatus.status === 'ok' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
-                            )}>
-                              {modelStatus.status === 'ok' ? 'OK' : 'ERROR'}
+                  {apiHealth.error && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 space-y-1">
+                      <strong>ข้อผิดพลาด:</strong> {apiHealth.error}
+                      <p className="font-mono text-[11px] text-red-600">{apiHealth.details}</p>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-zinc-100 space-y-3">
+                    <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">ฐานข้อมูล RAG Patterns ({patterns.length} รูปแบบ)</h4>
+                    <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto">
+                      {patterns.map((p) => (
+                        <div key={p.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-200/60 flex items-center justify-between text-xs">
+                          <div className="flex-1 min-w-0 pr-4">
+                            <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold mr-2", p.label === 'cheating' ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700")}>
+                              {p.label === 'cheating' ? 'AI' : 'มนุษย์'}
                             </span>
+                            <span className="text-zinc-700 truncate font-serif">"{p.text}"</span>
                           </div>
-                          {modelStatus.latency !== undefined && (
-                            <div className="text-xs text-zinc-500">
-                              Latency: {modelStatus.latency}ms
-                            </div>
-                          )}
-                          {modelStatus.errorDetails && (
-                            <div className="text-xs text-red-500 mt-1">
-                              {modelStatus.errorDetails}
-                            </div>
-                          )}
+                          <button
+                            onClick={() => handleDeletePattern(p.id)}
+                            className="p-1 text-zinc-400 hover:text-red-500"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))}
                     </div>
-                  </>
-                )}
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -486,157 +488,24 @@ const AdminDashboard: React.FC<{ user: User }> = ({ user }) => {
   );
 };
 
-function NavButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={cn(
-        "p-3 rounded-xl transition-all group relative",
-        active ? "bg-zinc-900 text-white" : "text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100"
-      )}
-    >
-      {icon}
-      <span className="absolute left-full ml-4 px-2 py-1 bg-zinc-800 text-white text-[10px] font-mono rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-        {label}
-      </span>
-    </button>
-  );
-}
-
-function SubmissionCard({ submission, result, onDelete }: { submission: Submission, result?: AnalysisResult, onDelete: () => void }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  return (
-    <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden transition-all hover:border-blue-200 shadow-sm group">
-      <div 
-        className="p-6 cursor-pointer flex items-center justify-between"
-      >
-        <div className="flex items-center gap-6 flex-1" onClick={() => setIsExpanded(!isExpanded)}>
-          <div className={cn(
-            "w-12 h-12 rounded-2xl flex items-center justify-center",
-            submission.status === 'pending' ? "bg-zinc-100 text-zinc-400" :
-            result && result.cheatingScore > 50 ? "bg-red-50 text-red-500" : "bg-green-50 text-green-500"
-          )}>
-            {submission.status === 'pending' ? <RefreshCw className="w-6 h-6 animate-spin" /> : 
-             result && result.cheatingScore > 50 ? <AlertTriangle className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
-          </div>
-          
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <h4 className="font-black text-zinc-900 line-clamp-1 max-w-[200px] font-serif">{submission.text.slice(0, 30)}...</h4>
-              {submission.actualModelUsed && (
-                <span className="text-[9px] font-mono font-bold bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded border border-blue-100">
-                  {submission.actualModelUsed}
-                </span>
-              )}
-              {submission.disputed && (
-                <span className="text-[10px] font-mono font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-md shadow-orange-500/20">
-                  ถูกโต้แย้ง
-                </span>
-              )}
-              <div className="h-1 w-1 bg-zinc-200 rounded-full" />
-              <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">
-                {submission.status === 'pending' ? 'รอดำเนินการ' : submission.status === 'analyzed' ? 'วิเคราะห์แล้ว' : 'แก้ไขแล้ว'}
-              </span>
-            </div>
-            <p className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">{new Date(submission.timestamp).toLocaleString()}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-8">
-          {result && (
-            <div className="flex gap-4">
-              <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">ความมั่นใจ</div>
-                <div className={cn(
-                  "text-lg font-bold",
-                  (result.confidenceScore || 0) < 60 ? "text-amber-500" : "text-blue-600"
-                )}>
-                  {result.confidenceScore || 0}%
-                </div>
-              </div>
-              <div className="w-px h-8 bg-zinc-100" />
-              <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">AI / โกง</div>
-                <div className="text-lg font-bold text-red-500">{result.cheatingScore}%</div>
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              className="p-2 text-zinc-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
-            <ChevronRight 
-              onClick={() => setIsExpanded(!isExpanded)}
-              className={cn("w-5 h-5 text-zinc-300 transition-transform cursor-pointer", isExpanded && "rotate-90")} 
-            />
-          </div>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-t border-zinc-100 bg-zinc-50/50"
-          >
-            <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">ข้อความที่ส่งมา</h5>
-                <div className="p-6 bg-white border border-zinc-100 rounded-2xl text-sm text-zinc-600 leading-relaxed font-sans shadow-inner">
-                  {submission.text}
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                {result ? (
-                  <>
-                    <div className="space-y-4">
-                      <h5 className="text-xs font-mono text-zinc-400 uppercase tracking-widest">เหตุผลการวิเคราะห์</h5>
-                      <div className="prose prose-zinc prose-sm max-w-none text-zinc-600">
-                        <Markdown>{result.reasoning}</Markdown>
-                      </div>
-                    </div>
-
-                    {result.analysisDetails && (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 border-t border-zinc-100">
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">ไวยากรณ์</span>
-                          <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.grammar}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">ความลึก</span>
-                          <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.depth}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">การใช้คำ</span>
-                          <p className="text-[10px] text-zinc-600 line-clamp-2">{result.analysisDetails.wordUsage}</p>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-zinc-400 gap-4">
-                    <RefreshCw className="w-8 h-8 animate-spin" />
-                    <span className="text-xs font-mono uppercase tracking-widest">กำลังวิเคราะห์...</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
+const NavButton: React.FC<{ active: boolean; onClick: () => void; icon: React.ReactNode; label: string }> = ({
+  active,
+  onClick,
+  icon,
+  label
+}) => (
+  <button
+    onClick={onClick}
+    className={cn(
+      "flex flex-col items-center gap-1.5 p-3 rounded-2xl transition-all w-16",
+      active 
+        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" 
+        : "text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+    )}
+  >
+    {icon}
+    <span className="text-[9px] font-bold tracking-tight">{label}</span>
+  </button>
+);
 
 export default AdminDashboard;
-
